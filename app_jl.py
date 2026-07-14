@@ -21,8 +21,22 @@ st.set_page_config(page_title="ERP Gerencial - J&L", page_icon="🏢", layout="w
 CNPJ_JL = "30006303000182"
 EMAIL_SIEG = "empresarialdldp@gmail.com"
 
+# --- IDs DAS PLANILHAS ---
 ID_PLANILHA_MASTER = "1-bSAZ2683xoBOyZCXqFXJd5kRyUaJ8Q7sW3xPEgXR-A"
+ID_PLANILHA_WM_anual ="1t6vkBzCV1LaHxgL7_Uqu3MzesHJLcjhtNRM1ELcXQO8"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2026 ="1Y1zKjPqN7Bg9QVGx4RL87sE67MLtaV8Bs_DqlhxljLI"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2025 ="1LcWO-SST4419T_Rzg29Gh8QkUUsE4A_7GvTn8Y2W2Do"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2024 ="1zirXKO-SseM7oaJAw46Obig2vQaQz02RpDZyyAPX3Xk"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2023 ="1Q_mbB6e0VoRbsNJQtZHGB8NAuTR5QAQQwwvZcrtfB98"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2022 ="1McLVqg1p7XglyQWhtllI77iFoiIZj2Yq6vIcLOtKgms"
 
+# ==========================================
+# EXTRAÇÃO AUTOMÁTICA DO SDK DO BANCO INTER
+# ==========================================
+if not os.path.exists('inter_sdk_python') and os.path.exists('inter_sdk_python.zip'):
+    with zipfile.ZipFile('inter_sdk_python.zip', 'r') as zip_ref:
+        zip_ref.extractall('.')
+    st.toast("📦 SDK do Banco Inter extraído com sucesso na nuvem!", icon="⚙️")
 
 # ==========================================
 # 2. CONEXÕES E MOTORES BLINDADOS
