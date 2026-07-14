@@ -189,7 +189,7 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
 if "autenticado" not in st.session_state:
     st.title("🔒 Acesso Restrito - J&L Incorporadora")
     senha = st.text_input("Digite a senha:", type="password")
-    if senha == st.secrets.get("senha_sistema", "admin123"):
+    if senha == st.secrets.get("senha_sistema", "Dldp23"):
         st.session_state["autenticado"] = True
         st.rerun()
 else:
