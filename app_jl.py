@@ -23,13 +23,6 @@ EMAIL_SIEG = "empresarialdldp@gmail.com"
 
 ID_PLANILHA_MASTER = "1-bSAZ2683xoBOyZCXqFXJd5kRyUaJ8Q7sW3xPEgXR-A"
 
-# ==========================================
-# EXTRAÇÃO AUTOMÁTICA DO SDK DO BANCO INTER
-# ==========================================
-if not os.path.exists('inter_sdk_python') and os.path.exists('inter_sdk_python.zip'):
-    with zipfile.ZipFile('inter_sdk_python.zip', 'r') as zip_ref:
-        zip_ref.extractall('.')
-    st.toast("📦 SDK do Banco Inter extraído com sucesso!", icon="⚙️")
 
 # ==========================================
 # 2. CONEXÕES E MOTORES BLINDADOS
