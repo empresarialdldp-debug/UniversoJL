@@ -1,7 +1,9 @@
 streamlit
 pandas
+numpy
 gspread
 oauth2client
-requests
 plotly
+requests
 google-genai
+cryptography
