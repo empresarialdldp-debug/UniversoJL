@@ -301,6 +301,7 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
             except: pass
         return False, f"Falha na conexão com o Banco Inter: {str(e)}", []
 # ==========================================
+# ==========================================
 # 3. INTERFACE VISUAL E NAVEGAÇÃO
 # ==========================================
 if "autenticado" not in st.session_state:
@@ -314,6 +315,7 @@ else:
     modulo = st.sidebar.radio("Navegação:", [
         "📊 Dashboard Executivo",
         "🏦 Tesouraria (Banco Inter)",
+        "🏦 Tesouraria (Banco do Brasil)",
         "📥 Auditoria de Obras (SIEG)",
         "📝 Exportação Contábil (Domínio)"
     ])
@@ -331,15 +333,20 @@ else:
         with col2: data_fim = st.date_input("Data Final", datetime.date.today())
         
         if st.button("🚀 Capturar Extrato", type="primary"):
-            with st.spinner("Conectando ao Banco Inter..."):
-                sucesso, msg, transacoes = sincronizar_inter_nuvem(data_ini.strftime('%Y-%m-%d'), data_fim.strftime('%Y-%m-%d'))
+            with st.spinner("Conectando ao Banco Inter e ao Google Sheets..."):
+                sucesso, msg, transacoes_limpas = sincronizar_inter_nuvem(data_ini.strftime('%Y-%m-%d'), data_fim.strftime('%Y-%m-%d'))
                 if sucesso:
                     st.success(msg)
-                    if transacoes:
-                        # Extrai os dicionários de forma segura ignorando metadados da API
-                        df_transacoes = pd.DataFrame([t if isinstance(t, dict) else {a: getattr(t, a) for a in dir(t) if not a.startswith('_')} for t in transacoes])
-                        st.dataframe(df_transacoes)
+                    if transacoes_limpas:
+                        # Adeus from_dict! Mostra a tabela limpa exatamente como vai pro Excel
+                        df_display = pd.DataFrame(transacoes_limpas, columns=['ID', 'Data', 'Banco', 'Tipo', 'Valor', 'Descrição Original', 'Categoria', 'Conta Débito', 'Conta Crédito'])
+                        st.dataframe(df_display, hide_index=True)
                 else: st.error(msg)
+
+    # --- TELA: BANCO DO BRASIL (GAVETA) ---
+    elif modulo == "🏦 Tesouraria (Banco do Brasil)":
+        st.title("🏦 Sincronização Banco do Brasil")
+        st.warning("⚠️ Módulo em desenvolvimento. A integração com o Banco do Brasil (Conta 8) será implementada em breve.")
 
     # --- TELA 2: AUDITORIA (SIEG) ---
     elif modulo == "📥 Auditoria de Obras (SIEG)":
@@ -357,53 +364,40 @@ else:
                 else:
                     st.warning("Nenhuma nota encontrada.")
 
-    # --- TELA 3: DOMÍNIO ---
+    # --- TELA 3: DOMÍNIO (AUTO-APRENDIZADO) ---
     elif modulo == "📝 Exportação Contábil (Domínio)":
         st.title("📝 Fechamento Contábil e Exportação (Domínio)")
-        st.markdown("Edite as contas contábeis e salve as correções direto na planilha.")
+        st.markdown("Preencha as contas em branco. O sistema salvará no Caixa e **criará regras automáticas** para o futuro!")
         
         col_d1, col_d2, col_d3 = st.columns([1.5, 1.5, 2])
         with col_d1: data_ini_txt = st.date_input("Data Inicial", datetime.date.today().replace(day=1), key="dt_ini_contabil")
         with col_d2: data_fim_txt = st.date_input("Data Final", datetime.date.today(), key="dt_fim_contabil")
         with col_d3: 
-            banco_filtro = st.selectbox(
-                "Filtrar por Banco:", 
-                ["Todos os Bancos", "Banco Inter", "SICOOB"],
-                key="sel_banco_contabil"
-            )
+            banco_filtro = st.selectbox("Filtrar por Banco:", ["Todos os Bancos", "Banco Inter", "Banco do Brasil"], key="sel_banco_contabil")
         
         try:
             client_gspread = obter_cliente_sheets()
-            planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
-            try: 
-                aba_caixa = planilha.worksheet("Fluxo_Caixa")
-            except: 
-                st.error("Aba 'Fluxo_Caixa' não encontrada.")
+            if client_gspread is None:
+                st.error("Falha de conexão com o Google Sheets.")
                 st.stop()
                 
+            planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
+            aba_caixa = planilha.worksheet("Fluxo_Caixa")
             dados_rows = aba_caixa.get_all_values()
             
             if len(dados_rows) > 1:
                 df_caixa = pd.DataFrame(dados_rows[1:], columns=dados_rows[0])
                 df_caixa.columns = df_caixa.columns.str.strip()
                 
-                #MAPEAMENTO EXATO DAS COLUNAS DA SUA IMAGEM
                 colunas_necessarias = ['Data', 'Conta/Banco', 'Tipo', 'Valor', 'Descricao_Original', 'Categoria_Gerencial', 'Conta_Debito', 'Conta_Credito']
                 for col in colunas_necessarias:
-                    if col not in df_caixa.columns:
-                        df_caixa[col] = ""
+                    if col not in df_caixa.columns: df_caixa[col] = ""
                 
                 df_caixa['Data_Filtro'] = pd.to_datetime(df_caixa['Data'], errors='coerce').dt.date
                 mask_datas = (df_caixa['Data_Filtro'] >= data_ini_txt) & (df_caixa['Data_Filtro'] <= data_fim_txt)
-                
-                if banco_filtro != "Todos os Bancos":
-                    mask_bancos = df_caixa['Conta/Banco'].str.strip().str.upper() == banco_filtro.upper()
-                else:
-                    mask_bancos = pd.Series(True, index=df_caixa.index)
+                mask_bancos = pd.Series(True, index=df_caixa.index) if banco_filtro == "Todos os Bancos" else df_caixa['Conta/Banco'].str.strip().str.upper() == banco_filtro.upper()
                 
                 df_filtrado = df_caixa[mask_datas & mask_bancos].copy()
-                
-                st.write(f"📌 Exibindo **{len(df_filtrado)}** lançamentos da conta **{banco_filtro}** no período selecionado.")
                 
                 if not df_filtrado.empty:
                     df_view = df_filtrado[colunas_necessarias].copy()
@@ -416,49 +410,72 @@ else:
                             "Tipo": st.column_config.TextColumn("Tipo", disabled=True),
                             "Valor": st.column_config.TextColumn("Valor", disabled=True),
                             "Descricao_Original": st.column_config.TextColumn("Histórico Extrato", disabled=True),
-                            "Categoria_Gerencial": st.column_config.TextColumn("Categoria Dash", disabled=True),
-                            "Conta_Debito": st.column_config.TextColumn("Débito (Duplo Clique)"),
-                            "Conta_Credito": st.column_config.TextColumn("Crédito (Duplo Clique)"),
+                            "Categoria_Gerencial": st.column_config.TextColumn("Categoria Dash"),
+                            "Conta_Debito": st.column_config.TextColumn("Débito (Duplo Clique)", help="Saída/Despesa? Altere aqui."),
+                            "Conta_Credito": st.column_config.TextColumn("Crédito (Duplo Clique)", help="Entrada/Receita? Altere aqui."),
                         },
-                        use_container_width=True,
-                        num_rows="fixed",
-                        key="editor_contabil"
+                        use_container_width=True, num_rows="fixed", key="editor_contabil"
                     )
                     
                     st.divider()
                     col_info, col_save = st.columns([2, 2])
-                    
                     with col_info:
-                        st.info("💡 Dê 2 cliques na célula para editar a conta. Depois, clique em Salvar para gravar na base de dados.")
+                        st.info("💡 As contas preenchidas viram regras eternas. Você não precisará classificá-las de novo no próximo mês.")
                         
                     with col_save:
-                        if st.button("💾 Salvar Correções na Planilha Central", type="secondary", use_container_width=True):
-                            with st.spinner("Gravando alterações..."):
+                        if st.button("💾 Salvar Planilha & Criar Regras Automáticas", type="secondary", use_container_width=True):
+                            with st.spinner("Gravando alterações e treinando o sistema..."):
                                 try:
+                                    novas_regras = []
+                                    # Lógica para detectar se você preencheu uma conta em branco e aprender a regra
+                                    for idx, row in df_editado.iterrows():
+                                        deb_novo = str(row['Conta_Debito']).strip()
+                                        cred_novo = str(row['Conta_Credito']).strip()
+                                        deb_velho = str(df_view.loc[idx, 'Conta_Debito']).strip()
+                                        cred_velho = str(df_view.loc[idx, 'Conta_Credito']).strip()
+                                        
+                                        contrapartida_aprendida = ""
+                                        if row['Tipo'] == "DESPESA" and deb_novo != deb_velho and deb_novo != "747" and deb_novo != "":
+                                            contrapartida_aprendida = deb_novo
+                                        elif row['Tipo'] == "RECEITA" and cred_novo != cred_velho and cred_novo != "747" and cred_novo != "":
+                                            contrapartida_aprendida = cred_novo
+                                            
+                                        if contrapartida_aprendida:
+                                            # Formato da regra: Palavra Chave, Categoria, Contrapartida, Historico Padrao
+                                            novas_regras.append([row['Descricao_Original'], row['Categoria_Gerencial'], contrapartida_aprendida, "Lançamento Automático"])
+
+                                    # Atualiza o Fluxo de Caixa
                                     df_caixa.loc[df_editado.index, 'Conta_Debito'] = df_editado['Conta_Debito']
                                     df_caixa.loc[df_editado.index, 'Conta_Credito'] = df_editado['Conta_Credito']
+                                    df_caixa.loc[df_editado.index, 'Categoria_Gerencial'] = df_editado['Categoria_Gerencial']
                                     
                                     df_caixa = df_caixa.drop(columns=['Data_Filtro'])
                                     df_caixa = df_caixa.fillna("").astype(str)
-                                    
                                     dados_salvar = [df_caixa.columns.values.tolist()] + df_caixa.values.tolist()
-                                    
                                     aba_caixa.clear()
                                     aba_caixa.append_rows(dados_salvar)
                                     
-                                    st.success("Alterações salvas com sucesso!")
-                                    time.sleep(1.2)
+                                    # Salva as Novas Regras na planilha
+                                    if novas_regras:
+                                        aba_regras = planilha.worksheet("Regras_automaticas")
+                                        aba_regras.append_rows(novas_regras)
+                                        st.toast(f"🤖 {len(novas_regras)} novas regras aprendidas com sucesso!", icon="🧠")
+                                    
+                                    st.success("Tudo salvo com sucesso!")
+                                    time.sleep(1.5)
                                     st.rerun()
                                 except Exception as err_sheets:
                                     st.error(f"Erro ao salvar dados: {err_sheets}")
                 else:
                     st.warning("Nenhum lançamento encontrado neste intervalo.")
             else:
-                st.caption("A base central de caixas e bancos está vazia.")
-                
+                st.caption("A base central está vazia.")
         except Exception as e:
             st.error(f"Erro ao processar tela contábil: {e}")
+
     # --- TELA 4: DASHBOARD ---
     elif modulo == "📊 Dashboard Executivo":
+        st.title("📊 Visão Consolidada das Obras")
+        st.write("Acompanhamento de fluxo financeiro.")
         st.title("📊 Visão Consolidada das Obras")
         st.write("Acompanhamento de fluxo financeiro.")
