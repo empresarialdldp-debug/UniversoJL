@@ -143,163 +143,175 @@ def consultar_sieg_api(data_inicio, data_fim):
         st.error(f"Erro no motor SIEG: {e}")
         return pd.DataFrame()
 
-def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
-    """Lê a API do Inter, aplica regra do 747, deixa em branco se não houver regra e retorna tabela limpa."""
+def salvar_extrato_padronizado(transacoes_padrao, nome_banco):
+    """
+    Recebe uma lista padrão [{'id', 'data', 'valor', 'tipo', 'descricao'}]
+    Aplica as regras automáticas + a Regra do 747 e salva na planilha Fluxo_Caixa.
+    """
+    if not transacoes_padrao:
+        return True, "Nenhuma transação para processar.", []
+
+    client_gspread = obter_cliente_sheets()
+    if client_gspread is None:
+        return False, "Falha ao conectar no Google Sheets.", []
+        
+    planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
+    
+    try:
+        aba_caixa = planilha.worksheet("Fluxo_Caixa") 
+    except Exception as e:
+        return False, f"Aba 'Fluxo_Caixa' não encontrada.", []
+        
+    dados_existentes = aba_caixa.col_values(1) 
+    
+    regras_list = []
+    try:
+        aba_regras = planilha.worksheet("Regras_automaticas")
+        regras_list = aba_regras.get_all_records()
+    except: pass
+    
+    linhas_injetar = []
+    for t in transacoes_padrao:
+        if "SALDO" in t['descricao']: continue
+        if t['id'] in dados_existentes: continue 
+        
+        conta_contrapartida = ""
+        categoria_dash = "⚠️ A Classificar"
+        
+        for regra in regras_list:
+            termo = str(regra.get('Palavra_Chave no Extrato', '')).upper()
+            if termo and termo in t['descricao']:
+                conta_contrapartida = str(regra.get('Conta_Contrapartida (Dominio)', '')).strip()
+                cat_temp = str(regra.get('Categoria_Gerencial (Dashboard)', '')).strip()
+                if cat_temp: categoria_dash = cat_temp
+                break
+        
+        # REGRA CONTÁBIL J&L (747 Fixa)
+        if t['tipo'] == "RECEITA":
+            c_deb = "747"
+            c_cred = conta_contrapartida
+        else: # DESPESA
+            c_deb = conta_contrapartida
+            c_cred = "747"
+        
+        nova_linha = [
+            t['id'], t['data'], nome_banco, t['tipo'], 
+            f"{t['valor']:.2f}".replace('.', ','), 
+            t['descricao'], categoria_dash, c_deb, c_cred                   
+        ]
+        linhas_injetar.append(nova_linha)
+
+    if linhas_injetar:
+        aba_caixa.append_rows(linhas_injetar)
+        return True, f"Sucesso! {len(linhas_injetar)} movimentações do {nome_banco} salvas.", linhas_injetar
+    else:
+        return True, "Sincronizado. Nenhuma movimentação inédita no período.", []
+
+def processar_ofx_bb(conteudo_ofx):
+    """Lê o arquivo OFX do Banco do Brasil e converte para o formato padrão do sistema."""
+    transacoes = []
+    blocos = re.findall(r'<STMTTRN>(.*?)</STMTTRN>', conteudo_ofx, re.DOTALL)
+    
+    for b in blocos:
+        match_dt = re.search(r'<DTPOSTED>(\d{8})', b)
+        if not match_dt: continue
+        dt_raw = match_dt.group(1)
+        data_fmt = f"{dt_raw[:4]}-{dt_raw[4:6]}-{dt_raw[6:8]}"
+        
+        match_val = re.search(r'<TRNAMT>([\-\d\.]+)', b)
+        val = float(match_val.group(1)) if match_val else 0.0
+        if val == 0: continue
+        tipo = "RECEITA" if val > 0 else "DESPESA"
+        
+        match_memo = re.search(r'<MEMO>(.*?)(?:\r|\n|<)', b)
+        memo = match_memo.group(1).strip().upper() if match_memo else "TRANSACAO SEM NOME"
+        
+        match_id = re.search(r'<FITID>(.*?)(?:\r|\n|<)', b)
+        tid = match_id.group(1).strip() if match_id else f"BB-{dt_raw}-{abs(val)}"
+        
+        transacoes.append({
+            "id": tid, "data": data_fmt, "valor": abs(val), "tipo": tipo, "descricao": memo
+        })
+    return transacoes
+
+def buscar_inter_api(str_data_ini, str_data_fim):
+    """Conecta no Banco Inter e extrai os dados crus no formato padronizado."""
     caminho_pfx_temp = None
     try:
         creds_inter = st.secrets["inter_api"]
-        client_id = creds_inter["client_id"]
-        client_secret = creds_inter["client_secret"]
-        senha_pfx = creds_inter["pfx_senha"]
-        conta = creds_inter["conta_corrente"]
-        pfx_b64 = creds_inter["pfx_base64"]
-        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pfx') as tmp_pfx:
-            tmp_pfx.write(base64.b64decode(pfx_b64))
+            tmp_pfx.write(base64.b64decode(creds_inter["pfx_base64"]))
             caminho_pfx_temp = tmp_pfx.name
             
         from inter_sdk_python.InterSdk import InterSdk 
         motor = InterSdk(
-            environment="PRODUCTION", 
-            client_id=client_id, 
-            client_secret=client_secret,
-            certificate=caminho_pfx_temp, 
-            certificate_password=senha_pfx
+            environment="PRODUCTION", client_id=creds_inter["client_id"], 
+            client_secret=creds_inter["client_secret"],
+            certificate=caminho_pfx_temp, certificate_password=creds_inter["pfx_senha"]
         )
-        motor.set_account(conta.replace("-",""))
+        motor.set_account(creds_inter["conta_corrente"].replace("-",""))
         
-        data_ini_buscada = datetime.datetime.strptime(str_data_ini, '%Y-%m-%d')
-        data_fim_buscada = datetime.datetime.strptime(str_data_fim, '%Y-%m-%d')
+        dt_ini = datetime.datetime.strptime(str_data_ini, '%Y-%m-%d')
+        dt_fim = datetime.datetime.strptime(str_data_fim, '%Y-%m-%d')
         
-        lista_transacoes_total = []
-        data_fim_atual = data_fim_buscada
-        
-        while data_fim_atual >= data_ini_buscada:
-            data_ini_atual = max(data_fim_atual - datetime.timedelta(days=29), data_ini_buscada)
+        lista_raw = []
+        dt_fim_atual = dt_fim
+        while dt_fim_atual >= dt_ini:
+            dt_ini_atual = max(dt_fim_atual - datetime.timedelta(days=29), dt_ini)
             try:
-                extrato_obj = motor.banking().retrieve_statement(data_ini_atual.strftime('%Y-%m-%d'), data_fim_atual.strftime('%Y-%m-%d'))
-                if hasattr(extrato_obj, 'transactions') and extrato_obj.transactions:
-                    lista_transacoes_total.extend(extrato_obj.transactions)
-                elif hasattr(extrato_obj, 'transacoes') and extrato_obj.transacoes:
-                    lista_transacoes_total.extend(extrato_obj.transacoes)
+                ext = motor.banking().retrieve_statement(dt_ini_atual.strftime('%Y-%m-%d'), dt_fim_atual.strftime('%Y-%m-%d'))
+                if hasattr(ext, 'transactions') and ext.transactions: lista_raw.extend(ext.transactions)
+                elif hasattr(ext, 'transacoes') and ext.transacoes: lista_raw.extend(ext.transacoes)
             except: pass 
-            data_fim_atual = data_ini_atual - datetime.timedelta(days=1)
+            dt_fim_atual = dt_ini_atual - datetime.timedelta(days=1)
             
-        if not lista_transacoes_total:
-            if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
-            return True, "Nenhuma transação encontrada no período selecionado.", []
-            
-        client_gspread = obter_cliente_sheets()
-        if client_gspread is None:
-            if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
-            return False, "Falha ao conectar no Google Sheets.", []
-            
-        planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
+        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
         
-        try:
-            aba_caixa = planilha.worksheet("Fluxo_Caixa") 
-        except Exception as e:
-            return False, f"Aba 'Fluxo_Caixa' não encontrada.", []
-            
-        dados_existentes = aba_caixa.col_values(1) 
-        
-        regras_list = []
-        try:
-            aba_regras = planilha.worksheet("Regras_automaticas")
-            regras_list = aba_regras.get_all_records()
-        except: pass
-        
-        linhas_injetar = []
-        for idx, transacao in enumerate(lista_transacoes_total):
+        # Padronizando dados do Inter
+        transacoes_padrao = []
+        for t in lista_raw:
             def get_val(chaves, padrao=""):
-                if isinstance(transacao, dict):
+                if isinstance(t, dict):
                     for c in chaves:
-                        if c in transacao: return transacao[c]
+                        if c in t: return t[c]
                 else:
                     for c in chaves:
-                        if hasattr(transacao, c): return getattr(transacao, c)
+                        if hasattr(t, c): return getattr(t, c)
                 return padrao
-
-            titulo = get_val(['title', 'titulo'], '')
-            desc_original = get_val(['description', 'descricao'], '')
-            descricao = f"{titulo} {desc_original}".strip().upper()
-            
-            if "SALDO" in descricao: continue 
-            
-            valor = float(get_val(['value', 'valor', 'valorTransacao', 'valor_transacao'], 0))
-            if valor == 0: continue
-            
-            tipo_op = str(get_val(['operationType', 'tipoOperacao', 'operation_type', 'tipo_operacao'], 'C')).upper()
-            tipo = "DESPESA" if tipo_op in ['D', 'DEBIT', 'DEBITO', 'PAYMENT'] else "RECEITA"
                 
-            import re
-            data_lancamento = str_data_fim
-            id_transacao = f"INTER-{idx}"
-            atributos = transacao.keys() if isinstance(transacao, dict) else dir(transacao)
+            val = float(get_val(['value', 'valor', 'valorTransacao'], 0))
+            if val == 0: continue
             
+            tipo_op = str(get_val(['operationType', 'tipoOperacao', 'operation_type'], 'C')).upper()
+            tipo = "DESPESA" if tipo_op in ['D', 'DEBIT', 'DEBITO', 'PAYMENT'] else "RECEITA"
+            
+            titulo = get_val(['title', 'titulo'], '')
+            desc = get_val(['description', 'descricao'], '')
+            memo = f"{titulo} {desc}".strip().upper()
+            
+            dt_lanc = str_data_fim
+            tid = f"INTER-{len(transacoes_padrao)}"
+            
+            atributos = t.keys() if isinstance(t, dict) else dir(t)
             for attr in atributos:
                 if attr.startswith('_'): continue
                 try:
-                    valor_attr = str(transacao[attr]) if isinstance(transacao, dict) else str(getattr(transacao, attr))
+                    v_attr = str(t[attr]) if isinstance(t, dict) else str(getattr(t, attr))
                     if 'dat' in attr.lower():
-                        match_dt = re.search(r'(202\d-[0-1]\d-[0-3]\d)', valor_attr)
-                        if match_dt: data_lancamento = match_dt.group(1)
+                        match_dt = re.search(r'(202\d-[0-1]\d-[0-3]\d)', v_attr)
+                        if match_dt: dt_lanc = match_dt.group(1)
+                    if attr.lower() in ['id', 'idtransacao', 'transactionid', 'identificador']:
+                        if v_attr and len(v_attr) > 5: tid = v_attr
                 except: continue
-                    
-            if id_transacao == f"INTER-{idx}": id_transacao = f"INTER-{data_lancamento}-{idx}"
                 
-            try: data_formatada = datetime.datetime.strptime(data_lancamento, '%Y-%m-%d').strftime('%Y-%m-%d')
-            except: data_formatada = data_lancamento
-                
-            if id_transacao in dados_existentes: continue 
+            transacoes_padrao.append({
+                "id": tid, "data": dt_lanc, "valor": abs(val), "tipo": tipo, "descricao": memo
+            })
             
-            conta_contrapartida = ""
-            categoria_dash = "⚠️ A Classificar"
-            
-            # Busca nas regras
-            for regra in regras_list:
-                termo = str(regra.get('Palavra_Chave no Extrato', '')).upper()
-                if termo and termo in descricao:
-                    conta_contrapartida = str(regra.get('Conta_Contrapartida (Dominio)', '')).strip()
-                    cat_temp = str(regra.get('Categoria_Gerencial (Dashboard)', '')).strip()
-                    if cat_temp: categoria_dash = cat_temp
-                    break
-            
-            # REGRA CONTÁBIL DE OURO J&L (747 Fixa)
-            if tipo == "RECEITA":
-                c_deb = "747"
-                c_cred = conta_contrapartida # Se for "", fica "" para preencher na tela
-            else: # DESPESA
-                c_deb = conta_contrapartida # Se for "", fica "" para preencher na tela
-                c_cred = "747"
-            
-            nova_linha = [
-                id_transacao,            
-                data_formatada,          
-                "Banco Inter",           
-                tipo,                    
-                f"{abs(valor):.2f}".replace('.', ','), 
-                descricao,               
-                categoria_dash,          
-                c_deb,                   
-                c_cred                   
-            ]
-            linhas_injetar.append(nova_linha)
-                
-        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
-
-        if linhas_injetar:
-            aba_caixa.append_rows(linhas_injetar)
-            # RETORNA A TABELA LIMPA PARA A TELA 1 EM VEZ DOS CÓDIGOS FEIOS
-            return True, f"Sucesso! {len(linhas_injetar)} movimentações salvas na aba Fluxo_Caixa.", linhas_injetar
-        else:
-            return True, "Sincronizado. Nenhuma movimentação inédita no período.", []
-            
+        return transacoes_padrao
     except Exception as e:
-        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
-            try: os.remove(caminho_pfx_temp)
-            except: pass
-        return False, f"Falha na conexão com o Banco Inter: {str(e)}", []
+        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
+        raise e
 # ==========================================
 # ==========================================
 # 3. INTERFACE VISUAL E NAVEGAÇÃO
@@ -313,11 +325,10 @@ if "autenticado" not in st.session_state:
 else:
     st.sidebar.title("🏢 Módulos J&L")
     modulo = st.sidebar.radio("Navegação:", [
-        "📊 Dashboard Executivo",
-        "🏦 Tesouraria (Banco Inter)",
-        "🏦 Tesouraria (Banco do Brasil)",
+        "🏦 Tesouraria Central (Inter e BB)",
+        "📝 Exportação Contábil (Domínio)",
         "📥 Auditoria de Obras (SIEG)",
-        "📝 Exportação Contábil (Domínio)"
+        "📊 Dashboard Executivo"
     ])
     
     st.sidebar.divider()
@@ -325,46 +336,56 @@ else:
         del st.session_state["autenticado"]
         st.rerun()
 
-    # --- TELA 1: TESOURARIA (INTER) ---
-    if modulo == "🏦 Tesouraria (Banco Inter)":
-        st.title("🏦 Sincronização Open Finance (Inter)")
-        col1, col2 = st.columns(2)
-        with col1: data_ini = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=7))
-        with col2: data_fim = st.date_input("Data Final", datetime.date.today())
+    # --- TELA 1: TESOURARIA (UNIFICADA) ---
+    if modulo == "🏦 Tesouraria Central (Inter e BB)":
+        st.title("🏦 Central de Tesouraria e Caixas")
+        st.markdown("Sincronize ou importe os extratos bancários. O sistema aplicará a **Regra de Ouro (Conta 747)** automaticamente.")
         
-        if st.button("🚀 Capturar Extrato", type="primary"):
-            with st.spinner("Conectando ao Banco Inter e ao Google Sheets..."):
-                sucesso, msg, transacoes_limpas = sincronizar_inter_nuvem(data_ini.strftime('%Y-%m-%d'), data_fim.strftime('%Y-%m-%d'))
-                if sucesso:
-                    st.success(msg)
-                    if transacoes_limpas:
-                        # Adeus from_dict! Mostra a tabela limpa exatamente como vai pro Excel
-                        df_display = pd.DataFrame(transacoes_limpas, columns=['ID', 'Data', 'Banco', 'Tipo', 'Valor', 'Descrição Original', 'Categoria', 'Conta Débito', 'Conta Crédito'])
-                        st.dataframe(df_display, hide_index=True)
-                else: st.error(msg)
-
-    # --- TELA: BANCO DO BRASIL (GAVETA) ---
-    elif modulo == "🏦 Tesouraria (Banco do Brasil)":
-        st.title("🏦 Sincronização Banco do Brasil")
-        st.warning("⚠️ Módulo em desenvolvimento. A integração com o Banco do Brasil (Conta 8) será implementada em breve.")
-
-    # --- TELA 2: AUDITORIA (SIEG) ---
-    elif modulo == "📥 Auditoria de Obras (SIEG)":
-        st.title("📥 Captura de Notas de Insumos e Serviços")
-        col1, col2 = st.columns(2)
-        with col1: data_ini = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=15), key="sieg_ini")
-        with col2: data_fim = st.date_input("Data Final", datetime.date.today(), key="sieg_fim")
+        col_inter, col_bb = st.columns(2)
         
-        if st.button("🔍 Rastrear Notas Fiscais", type="primary"):
-            with st.spinner("Varrendo portal da Receita Federal..."):
-                df_notas = consultar_sieg_api(data_ini, data_fim)
-                if not df_notas.empty:
-                    st.success(f"{len(df_notas)} notas encontradas.")
-                    st.dataframe(df_notas, use_container_width=True)
-                else:
-                    st.warning("Nenhuma nota encontrada.")
+        # --- PAINEL BANCO INTER ---
+        with col_inter:
+            st.subheader("🟠 API Banco Inter")
+            st.markdown("Conexão direta e automática (Open Finance)")
+            data_ini = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=7), key="dt_inter_ini")
+            data_fim = st.date_input("Data Final", datetime.date.today(), key="dt_inter_fim")
+            
+            if st.button("🚀 Puxar Extrato Inter", type="primary", use_container_width=True):
+                with st.spinner("Puxando API do Inter..."):
+                    try:
+                        t_padrao = buscar_inter_api(data_ini.strftime('%Y-%m-%d'), data_fim.strftime('%Y-%m-%d'))
+                        sucesso, msg, t_inseridas = salvar_extrato_padronizado(t_padrao, "Banco Inter")
+                        if sucesso:
+                            st.success(msg)
+                            if t_inseridas:
+                                df_disp = pd.DataFrame(t_inseridas, columns=['ID', 'Data', 'Banco', 'Tipo', 'Valor', 'Descrição Original', 'Categoria', 'Conta Débito', 'Conta Crédito'])
+                                st.dataframe(df_disp, hide_index=True)
+                        else: st.error(msg)
+                    except Exception as e:
+                        st.error(f"Erro no Inter: {e}")
 
-    # --- TELA 3: DOMÍNIO (AUTO-APRENDIZADO) ---
+        # --- PAINEL BANCO DO BRASIL ---
+        with col_bb:
+            st.subheader("🔵 Arquivo OFX - Banco do Brasil")
+            st.markdown("Importação manual via arquivo do banco")
+            arquivo_ofx = st.file_uploader("Arraste o extrato .OFX aqui", type=["ofx"])
+            
+            if st.button("📂 Processar OFX", type="primary", use_container_width=True) and arquivo_ofx:
+                with st.spinner("Lendo arquivo e aplicando regras..."):
+                    try:
+                        conteudo = arquivo_ofx.read().decode('utf-8', errors='ignore')
+                        t_padrao = processar_ofx_bb(conteudo)
+                        sucesso, msg, t_inseridas = salvar_extrato_padronizado(t_padrao, "Banco do Brasil")
+                        if sucesso:
+                            st.success(msg)
+                            if t_inseridas:
+                                df_disp = pd.DataFrame(t_inseridas, columns=['ID', 'Data', 'Banco', 'Tipo', 'Valor', 'Descrição Original', 'Categoria', 'Conta Débito', 'Conta Crédito'])
+                                st.dataframe(df_disp, hide_index=True)
+                        else: st.error(msg)
+                    except Exception as e:
+                        st.error(f"Erro no processamento OFX: {e}")
+
+    # --- TELA 2: DOMÍNIO (CONTABILIDADE) ---
     elif modulo == "📝 Exportação Contábil (Domínio)":
         st.title("📝 Fechamento Contábil e Exportação (Domínio)")
         st.markdown("Preencha as contas em branco. O sistema salvará no Caixa e **criará regras automáticas** para o futuro!")
@@ -411,8 +432,8 @@ else:
                             "Valor": st.column_config.TextColumn("Valor", disabled=True),
                             "Descricao_Original": st.column_config.TextColumn("Histórico Extrato", disabled=True),
                             "Categoria_Gerencial": st.column_config.TextColumn("Categoria Dash"),
-                            "Conta_Debito": st.column_config.TextColumn("Débito (Duplo Clique)", help="Saída/Despesa? Altere aqui."),
-                            "Conta_Credito": st.column_config.TextColumn("Crédito (Duplo Clique)", help="Entrada/Receita? Altere aqui."),
+                            "Conta_Debito": st.column_config.TextColumn("Débito (Duplo Clique)"),
+                            "Conta_Credito": st.column_config.TextColumn("Crédito (Duplo Clique)"),
                         },
                         use_container_width=True, num_rows="fixed", key="editor_contabil"
                     )
@@ -427,7 +448,6 @@ else:
                             with st.spinner("Gravando alterações e treinando o sistema..."):
                                 try:
                                     novas_regras = []
-                                    # Lógica para detectar se você preencheu uma conta em branco e aprender a regra
                                     for idx, row in df_editado.iterrows():
                                         deb_novo = str(row['Conta_Debito']).strip()
                                         cred_novo = str(row['Conta_Credito']).strip()
@@ -441,10 +461,8 @@ else:
                                             contrapartida_aprendida = cred_novo
                                             
                                         if contrapartida_aprendida:
-                                            # Formato da regra: Palavra Chave, Categoria, Contrapartida, Historico Padrao
                                             novas_regras.append([row['Descricao_Original'], row['Categoria_Gerencial'], contrapartida_aprendida, "Lançamento Automático"])
 
-                                    # Atualiza o Fluxo de Caixa
                                     df_caixa.loc[df_editado.index, 'Conta_Debito'] = df_editado['Conta_Debito']
                                     df_caixa.loc[df_editado.index, 'Conta_Credito'] = df_editado['Conta_Credito']
                                     df_caixa.loc[df_editado.index, 'Categoria_Gerencial'] = df_editado['Categoria_Gerencial']
@@ -455,7 +473,6 @@ else:
                                     aba_caixa.clear()
                                     aba_caixa.append_rows(dados_salvar)
                                     
-                                    # Salva as Novas Regras na planilha
                                     if novas_regras:
                                         aba_regras = planilha.worksheet("Regras_automaticas")
                                         aba_regras.append_rows(novas_regras)
@@ -472,7 +489,6 @@ else:
                 st.caption("A base central está vazia.")
         except Exception as e:
             st.error(f"Erro ao processar tela contábil: {e}")
-
     # --- TELA 4: DASHBOARD ---
     elif modulo == "📊 Dashboard Executivo":
         st.title("📊 Visão Consolidada das Obras")
