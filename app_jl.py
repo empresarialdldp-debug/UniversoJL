@@ -144,10 +144,9 @@ def consultar_sieg_api(data_inicio, data_fim):
         return pd.DataFrame()
 
 def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
-    """Lê a API do Inter num intervalo de datas específico e aplica regras contábeis."""
+    """Lê a API do Inter, aplica regra do 747, deixa em branco se não houver regra e retorna tabela limpa."""
     caminho_pfx_temp = None
     try:
-        # Autenticação do Banco Inter (Base64)
         creds_inter = st.secrets["inter_api"]
         client_id = creds_inter["client_id"]
         client_secret = creds_inter["client_secret"]
@@ -190,17 +189,17 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
             if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
             return True, "Nenhuma transação encontrada no período selecionado.", []
             
-        linhas_injetar = []
-        
-        # AQUI USAMOS A SUA FUNÇÃO ORIGINAL DE CONEXÃO AO SHEETS (QUE ESTÁ FUNCIONANDO)
         client_gspread = obter_cliente_sheets()
+        if client_gspread is None:
+            if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
+            return False, "Falha ao conectar no Google Sheets.", []
+            
         planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
         
-        # CONECTANDO NAS SUAS ABAS EXATAS
         try:
             aba_caixa = planilha.worksheet("Fluxo_Caixa") 
         except Exception as e:
-            return False, f"Aba 'Fluxo_Caixa' não encontrada. Verifique o nome na planilha. Erro: {e}", []
+            return False, f"Aba 'Fluxo_Caixa' não encontrada.", []
             
         dados_existentes = aba_caixa.col_values(1) 
         
@@ -210,6 +209,7 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
             regras_list = aba_regras.get_all_records()
         except: pass
         
+        linhas_injetar = []
         for idx, transacao in enumerate(lista_transacoes_total):
             def get_val(chaves, padrao=""):
                 if isinstance(transacao, dict):
@@ -244,13 +244,6 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
                     if 'dat' in attr.lower():
                         match_dt = re.search(r'(202\d-[0-1]\d-[0-3]\d)', valor_attr)
                         if match_dt: data_lancamento = match_dt.group(1)
-                        else:
-                            match_dt_br = re.search(r'([0-3]\d/[0-1]\d/202\d)', valor_attr)
-                            if match_dt_br:
-                                dt_br = match_dt_br.group(1)
-                                data_lancamento = f"{dt_br[6:10]}-{dt_br[3:5]}-{dt_br[0:2]}"
-                    if attr.lower() in ['id', 'idtransacao', 'id_transacao', 'transactionid', 'transaction_id', 'identificador']:
-                        if valor_attr and len(valor_attr) > 5: id_transacao = valor_attr
                 except: continue
                     
             if id_transacao == f"INTER-{idx}": id_transacao = f"INTER-{data_lancamento}-{idx}"
@@ -263,7 +256,7 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
             conta_contrapartida = ""
             categoria_dash = "⚠️ A Classificar"
             
-            # APLICANDO AS REGRAS BASEADAS NAS COLUNAS REAIS DA SUA IMAGEM
+            # Busca nas regras
             for regra in regras_list:
                 termo = str(regra.get('Palavra_Chave no Extrato', '')).upper()
                 if termo and termo in descricao:
@@ -271,29 +264,25 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
                     cat_temp = str(regra.get('Categoria_Gerencial (Dashboard)', '')).strip()
                     if cat_temp: categoria_dash = cat_temp
                     break
-                    
-            if conta_contrapartida == "":
-                if tipo == "RECEITA":
-                    conta_contrapartida = "504"
-                    if categoria_dash == "⚠️ A Classificar": categoria_dash = "Receitas de serviços"
-                else: 
-                    conta_contrapartida = "506"
-                    if categoria_dash == "⚠️ A Classificar": categoria_dash = "Fornecedores"
             
-            c_deb = "747" if tipo == "RECEITA" else conta_contrapartida
-            c_cred = conta_contrapartida if tipo == "RECEITA" else "747"
+            # REGRA CONTÁBIL DE OURO J&L (747 Fixa)
+            if tipo == "RECEITA":
+                c_deb = "747"
+                c_cred = conta_contrapartida # Se for "", fica "" para preencher na tela
+            else: # DESPESA
+                c_deb = conta_contrapartida # Se for "", fica "" para preencher na tela
+                c_cred = "747"
             
-            # ESTRUTURA EXATA DAS 9 COLUNAS (A até I) DA ABA FLUXO_CAIXA
             nova_linha = [
-                id_transacao,            # A: ID_Transacao
-                data_formatada,          # B: Data
-                "Banco Inter",           # C: Conta/Banco
-                tipo,                    # D: Tipo
-                f"{abs(valor):.2f}".replace('.', ','), # E: Valor
-                descricao,               # F: Descricao_Original
-                categoria_dash,          # G: Categoria_Gerencial
-                c_deb,                   # H: Conta_Debito
-                c_cred                   # I: Conta_Credito
+                id_transacao,            
+                data_formatada,          
+                "Banco Inter",           
+                tipo,                    
+                f"{abs(valor):.2f}".replace('.', ','), 
+                descricao,               
+                categoria_dash,          
+                c_deb,                   
+                c_cred                   
             ]
             linhas_injetar.append(nova_linha)
                 
@@ -301,7 +290,8 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
 
         if linhas_injetar:
             aba_caixa.append_rows(linhas_injetar)
-            return True, f"Sucesso! {len(linhas_injetar)} movimentações salvas na aba Fluxo_Caixa.", lista_transacoes_total
+            # RETORNA A TABELA LIMPA PARA A TELA 1 EM VEZ DOS CÓDIGOS FEIOS
+            return True, f"Sucesso! {len(linhas_injetar)} movimentações salvas na aba Fluxo_Caixa.", linhas_injetar
         else:
             return True, "Sincronizado. Nenhuma movimentação inédita no período.", []
             
