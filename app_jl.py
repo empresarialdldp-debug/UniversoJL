@@ -22,13 +22,13 @@ CNPJ_JL = "30006303000182"
 EMAIL_SIEG = "empresarialdldp@gmail.com"
 
 # --- IDs DAS PLANILHAS ---
-ID_PLANILHA_MASTER = "1RF8cSH6fVKWSzquYhfFQAAkt4t4EVPvK"
-ID_PLANILHA_WM_anual ="1UfOQJwfPJnoox45WoelVxy7CL6BT13hi"
-ID_PLANILHA_Recebimento_Wilson_Moreira_2026 ="1_PyU0Y6t83csETnSsXlDPcg9C2hnSHF-"
-ID_PLANILHA_Recebimento_Wilson_Moreira_2025 ="1J8vAgdj1m6ZhgE_iUfykdgMFEhSn2XrY"
-ID_PLANILHA_Recebimento_Wilson_Moreira_2024 ="1qUI3FHzTpxlDzUj2P8-eI1Z2e9zWeUbe"
-ID_PLANILHA_Recebimento_Wilson_Moreira_2023 ="1D8hGaoSDrgmryy_TnYClmkz6ZkAlSJbQ"
-ID_PLANILHA_Recebimento_Wilson_Moreira_2022 ="1-X0OwDKIRxKamJFib_-olzR2dDww-yqI"
+ID_PLANILHA_MASTER = "1azNi85ir10HXcJGd1pa7Wh2ceZ5hQb_U9qMPqldjFjs"
+ID_PLANILHA_WM_anual ="1O499mTddJPCTpAC5oPEATmYgd1BBKcWL7oVU_vFumBU"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2026 ="1N3f4sjn-xCDl2wDORhsHVEKWDLxRQGp7A8bgh1h3J8k"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2025 ="1xVJNLe6oLfGr-7sjsz8Yte8zSIHxfLTo811de_tACeo"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2024 ="1UKclnSZfP1MQQHMDHxRb4beHMBJqHAZIoduaeu7DYDE"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2023 ="1V_zqHga4gkH6geLi06MOtrJDC8OPc6QVBjFhdFOusC0"
+ID_PLANILHA_Recebimento_Wilson_Moreira_2022 ="1P6HPr4vdiH0V9buhc2iBYLNtiv4b1OoaUO9nvOs73OM"
 
 # ==========================================
 # EXTRAÇÃO AUTOMÁTICA DO SDK DO BANCO INTER
