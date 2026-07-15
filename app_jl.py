@@ -147,6 +147,7 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
     """Lê a API do Inter num intervalo de datas específico e aplica regras contábeis."""
     caminho_pfx_temp = None
     try:
+        # Autenticação do Banco Inter (Base64)
         creds_inter = st.secrets["inter_api"]
         client_id = creds_inter["client_id"]
         client_secret = creds_inter["client_secret"]
@@ -190,14 +191,16 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
             return True, "Nenhuma transação encontrada no período selecionado.", []
             
         linhas_injetar = []
+        
+        # AQUI USAMOS A SUA FUNÇÃO ORIGINAL DE CONEXÃO AO SHEETS (QUE ESTÁ FUNCIONANDO)
         client_gspread = obter_cliente_sheets()
         planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
         
-        # APONTAMENTO PARA A ABA CORRETA DA IMAGEM
+        # CONECTANDO NAS SUAS ABAS EXATAS
         try:
             aba_caixa = planilha.worksheet("Fluxo_Caixa") 
-        except:
-            return False, "Aba 'Fluxo_Caixa' não encontrada no Sheets.", []
+        except Exception as e:
+            return False, f"Aba 'Fluxo_Caixa' não encontrada. Verifique o nome na planilha. Erro: {e}", []
             
         dados_existentes = aba_caixa.col_values(1) 
         
@@ -260,7 +263,7 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
             conta_contrapartida = ""
             categoria_dash = "⚠️ A Classificar"
             
-            # LEITURA EXATA DAS COLUNAS DA SUA IMAGEM DAS REGRAS
+            # APLICANDO AS REGRAS BASEADAS NAS COLUNAS REAIS DA SUA IMAGEM
             for regra in regras_list:
                 termo = str(regra.get('Palavra_Chave no Extrato', '')).upper()
                 if termo and termo in descricao:
@@ -280,7 +283,7 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
             c_deb = "747" if tipo == "RECEITA" else conta_contrapartida
             c_cred = conta_contrapartida if tipo == "RECEITA" else "747"
             
-            # INJEÇÃO DAS 9 COLUNAS EXATAS DA ABA FLUXO_CAIXA
+            # ESTRUTURA EXATA DAS 9 COLUNAS (A até I) DA ABA FLUXO_CAIXA
             nova_linha = [
                 id_transacao,            # A: ID_Transacao
                 data_formatada,          # B: Data
@@ -307,7 +310,6 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
             try: os.remove(caminho_pfx_temp)
             except: pass
         return False, f"Falha na conexão com o Banco Inter: {str(e)}", []
-
 # ==========================================
 # 3. INTERFACE VISUAL E NAVEGAÇÃO
 # ==========================================
@@ -383,7 +385,8 @@ else:
         try:
             client_gspread = obter_cliente_sheets()
             planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
-            try: aba_caixa = planilha.worksheet("Fluxo_Caixa")
+            try: 
+                aba_caixa = planilha.worksheet("Fluxo_Caixa")
             except: 
                 st.error("Aba 'Fluxo_Caixa' não encontrada.")
                 st.stop()
@@ -394,7 +397,7 @@ else:
                 df_caixa = pd.DataFrame(dados_rows[1:], columns=dados_rows[0])
                 df_caixa.columns = df_caixa.columns.str.strip()
                 
-                #MAPEAMENTO DAS COLUNAS EXATAS DA ABA FLUXO_CAIXA
+                #MAPEAMENTO EXATO DAS COLUNAS DA SUA IMAGEM
                 colunas_necessarias = ['Data', 'Conta/Banco', 'Tipo', 'Valor', 'Descricao_Original', 'Categoria_Gerencial', 'Conta_Debito', 'Conta_Credito']
                 for col in colunas_necessarias:
                     if col not in df_caixa.columns:
