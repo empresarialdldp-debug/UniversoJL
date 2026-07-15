@@ -144,10 +144,14 @@ def consultar_sieg_api(data_inicio, data_fim):
         return pd.DataFrame()
 
 def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
-    """Lê a API do Inter num intervalo de datas com decodificador de PFX via Base64."""
+    """Lê a API do Inter num intervalo de datas específico e aplica regras contábeis."""
     caminho_pfx_temp = None
     try:
         creds_inter = st.secrets["inter_api"]
+        client_id = creds_inter["client_id"]
+        client_secret = creds_inter["client_secret"]
+        senha_pfx = creds_inter["pfx_senha"]
+        conta = creds_inter["conta_corrente"]
         pfx_b64 = creds_inter["pfx_base64"]
         
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pfx') as tmp_pfx:
@@ -157,38 +161,152 @@ def sincronizar_inter_nuvem(str_data_ini, str_data_fim):
         from inter_sdk_python.InterSdk import InterSdk 
         motor = InterSdk(
             environment="PRODUCTION", 
-            client_id=creds_inter["client_id"], 
-            client_secret=creds_inter["client_secret"],
+            client_id=client_id, 
+            client_secret=client_secret,
             certificate=caminho_pfx_temp, 
-            certificate_password=creds_inter["pfx_senha"]
+            certificate_password=senha_pfx
         )
-        motor.set_account(creds_inter["conta_corrente"].replace("-",""))
+        motor.set_account(conta.replace("-",""))
         
         data_ini_buscada = datetime.datetime.strptime(str_data_ini, '%Y-%m-%d')
         data_fim_buscada = datetime.datetime.strptime(str_data_fim, '%Y-%m-%d')
         
-        lista_transacoes = []
+        lista_transacoes_total = []
         data_fim_atual = data_fim_buscada
         
-        # Fatiamento do período para evitar bloqueio da API do Banco
         while data_fim_atual >= data_ini_buscada:
             data_ini_atual = max(data_fim_atual - datetime.timedelta(days=29), data_ini_buscada)
             try:
-                extrato = motor.banking().retrieve_statement(data_ini_atual.strftime('%Y-%m-%d'), data_fim_atual.strftime('%Y-%m-%d'))
-                if hasattr(extrato, 'transactions'): lista_transacoes.extend(extrato.transactions)
-                elif hasattr(extrato, 'transacoes'): lista_transacoes.extend(extrato.transacoes)
-            except: pass
+                extrato_obj = motor.banking().retrieve_statement(data_ini_atual.strftime('%Y-%m-%d'), data_fim_atual.strftime('%Y-%m-%d'))
+                if hasattr(extrato_obj, 'transactions') and extrato_obj.transactions:
+                    lista_transacoes_total.extend(extrato_obj.transactions)
+                elif hasattr(extrato_obj, 'transacoes') and extrato_obj.transacoes:
+                    lista_transacoes_total.extend(extrato_obj.transacoes)
+            except: pass 
             data_fim_atual = data_ini_atual - datetime.timedelta(days=1)
             
-        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
-        
-        if not lista_transacoes:
-            return True, "Nenhuma transação encontrada no período.", []
+        if not lista_transacoes_total:
+            if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
+            return True, "Nenhuma transação encontrada no período selecionado.", []
             
-        return True, f"{len(lista_transacoes)} transações extraídas com sucesso.", lista_transacoes
-    except Exception as e:
+        linhas_injetar = []
+        client_gspread = obter_cliente_sheets()
+        planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
+        
+        # APONTAMENTO PARA A ABA CORRETA DA IMAGEM
+        try:
+            aba_caixa = planilha.worksheet("Fluxo_Caixa") 
+        except:
+            return False, "Aba 'Fluxo_Caixa' não encontrada no Sheets.", []
+            
+        dados_existentes = aba_caixa.col_values(1) 
+        
+        regras_list = []
+        try:
+            aba_regras = planilha.worksheet("Regras_automaticas")
+            regras_list = aba_regras.get_all_records()
+        except: pass
+        
+        for idx, transacao in enumerate(lista_transacoes_total):
+            def get_val(chaves, padrao=""):
+                if isinstance(transacao, dict):
+                    for c in chaves:
+                        if c in transacao: return transacao[c]
+                else:
+                    for c in chaves:
+                        if hasattr(transacao, c): return getattr(transacao, c)
+                return padrao
+
+            titulo = get_val(['title', 'titulo'], '')
+            desc_original = get_val(['description', 'descricao'], '')
+            descricao = f"{titulo} {desc_original}".strip().upper()
+            
+            if "SALDO" in descricao: continue 
+            
+            valor = float(get_val(['value', 'valor', 'valorTransacao', 'valor_transacao'], 0))
+            if valor == 0: continue
+            
+            tipo_op = str(get_val(['operationType', 'tipoOperacao', 'operation_type', 'tipo_operacao'], 'C')).upper()
+            tipo = "DESPESA" if tipo_op in ['D', 'DEBIT', 'DEBITO', 'PAYMENT'] else "RECEITA"
+                
+            import re
+            data_lancamento = str_data_fim
+            id_transacao = f"INTER-{idx}"
+            atributos = transacao.keys() if isinstance(transacao, dict) else dir(transacao)
+            
+            for attr in atributos:
+                if attr.startswith('_'): continue
+                try:
+                    valor_attr = str(transacao[attr]) if isinstance(transacao, dict) else str(getattr(transacao, attr))
+                    if 'dat' in attr.lower():
+                        match_dt = re.search(r'(202\d-[0-1]\d-[0-3]\d)', valor_attr)
+                        if match_dt: data_lancamento = match_dt.group(1)
+                        else:
+                            match_dt_br = re.search(r'([0-3]\d/[0-1]\d/202\d)', valor_attr)
+                            if match_dt_br:
+                                dt_br = match_dt_br.group(1)
+                                data_lancamento = f"{dt_br[6:10]}-{dt_br[3:5]}-{dt_br[0:2]}"
+                    if attr.lower() in ['id', 'idtransacao', 'id_transacao', 'transactionid', 'transaction_id', 'identificador']:
+                        if valor_attr and len(valor_attr) > 5: id_transacao = valor_attr
+                except: continue
+                    
+            if id_transacao == f"INTER-{idx}": id_transacao = f"INTER-{data_lancamento}-{idx}"
+                
+            try: data_formatada = datetime.datetime.strptime(data_lancamento, '%Y-%m-%d').strftime('%Y-%m-%d')
+            except: data_formatada = data_lancamento
+                
+            if id_transacao in dados_existentes: continue 
+            
+            conta_contrapartida = ""
+            categoria_dash = "⚠️ A Classificar"
+            
+            # LEITURA EXATA DAS COLUNAS DA SUA IMAGEM DAS REGRAS
+            for regra in regras_list:
+                termo = str(regra.get('Palavra_Chave no Extrato', '')).upper()
+                if termo and termo in descricao:
+                    conta_contrapartida = str(regra.get('Conta_Contrapartida (Dominio)', '')).strip()
+                    cat_temp = str(regra.get('Categoria_Gerencial (Dashboard)', '')).strip()
+                    if cat_temp: categoria_dash = cat_temp
+                    break
+                    
+            if conta_contrapartida == "":
+                if tipo == "RECEITA":
+                    conta_contrapartida = "504"
+                    if categoria_dash == "⚠️ A Classificar": categoria_dash = "Receitas de serviços"
+                else: 
+                    conta_contrapartida = "506"
+                    if categoria_dash == "⚠️ A Classificar": categoria_dash = "Fornecedores"
+            
+            c_deb = "747" if tipo == "RECEITA" else conta_contrapartida
+            c_cred = conta_contrapartida if tipo == "RECEITA" else "747"
+            
+            # INJEÇÃO DAS 9 COLUNAS EXATAS DA ABA FLUXO_CAIXA
+            nova_linha = [
+                id_transacao,            # A: ID_Transacao
+                data_formatada,          # B: Data
+                "Banco Inter",           # C: Conta/Banco
+                tipo,                    # D: Tipo
+                f"{abs(valor):.2f}".replace('.', ','), # E: Valor
+                descricao,               # F: Descricao_Original
+                categoria_dash,          # G: Categoria_Gerencial
+                c_deb,                   # H: Conta_Debito
+                c_cred                   # I: Conta_Credito
+            ]
+            linhas_injetar.append(nova_linha)
+                
         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
-        return False, f"Falha no Banco Inter: {e}", []
+
+        if linhas_injetar:
+            aba_caixa.append_rows(linhas_injetar)
+            return True, f"Sucesso! {len(linhas_injetar)} movimentações salvas na aba Fluxo_Caixa.", lista_transacoes_total
+        else:
+            return True, "Sincronizado. Nenhuma movimentação inédita no período.", []
+            
+    except Exception as e:
+        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
+            try: os.remove(caminho_pfx_temp)
+            except: pass
+        return False, f"Falha na conexão com o Banco Inter: {str(e)}", []
 
 # ==========================================
 # 3. INTERFACE VISUAL E NAVEGAÇÃO
@@ -249,9 +367,104 @@ else:
 
     # --- TELA 3: DOMÍNIO ---
     elif modulo == "📝 Exportação Contábil (Domínio)":
-        st.title("📝 Gerador de Lote para Domínio Sistemas")
-        st.info("O módulo de geração de TXT posicional será ativado assim que o cruzamento de contas do extrato for homologado.")
+        st.title("📝 Fechamento Contábil e Exportação (Domínio)")
+        st.markdown("Edite as contas contábeis e salve as correções direto na planilha.")
         
+        col_d1, col_d2, col_d3 = st.columns([1.5, 1.5, 2])
+        with col_d1: data_ini_txt = st.date_input("Data Inicial", datetime.date.today().replace(day=1), key="dt_ini_contabil")
+        with col_d2: data_fim_txt = st.date_input("Data Final", datetime.date.today(), key="dt_fim_contabil")
+        with col_d3: 
+            banco_filtro = st.selectbox(
+                "Filtrar por Banco:", 
+                ["Todos os Bancos", "Banco Inter", "SICOOB"],
+                key="sel_banco_contabil"
+            )
+        
+        try:
+            client_gspread = obter_cliente_sheets()
+            planilha = client_gspread.open_by_key(ID_PLANILHA_MASTER)
+            try: aba_caixa = planilha.worksheet("Fluxo_Caixa")
+            except: 
+                st.error("Aba 'Fluxo_Caixa' não encontrada.")
+                st.stop()
+                
+            dados_rows = aba_caixa.get_all_values()
+            
+            if len(dados_rows) > 1:
+                df_caixa = pd.DataFrame(dados_rows[1:], columns=dados_rows[0])
+                df_caixa.columns = df_caixa.columns.str.strip()
+                
+                #MAPEAMENTO DAS COLUNAS EXATAS DA ABA FLUXO_CAIXA
+                colunas_necessarias = ['Data', 'Conta/Banco', 'Tipo', 'Valor', 'Descricao_Original', 'Categoria_Gerencial', 'Conta_Debito', 'Conta_Credito']
+                for col in colunas_necessarias:
+                    if col not in df_caixa.columns:
+                        df_caixa[col] = ""
+                
+                df_caixa['Data_Filtro'] = pd.to_datetime(df_caixa['Data'], errors='coerce').dt.date
+                mask_datas = (df_caixa['Data_Filtro'] >= data_ini_txt) & (df_caixa['Data_Filtro'] <= data_fim_txt)
+                
+                if banco_filtro != "Todos os Bancos":
+                    mask_bancos = df_caixa['Conta/Banco'].str.strip().str.upper() == banco_filtro.upper()
+                else:
+                    mask_bancos = pd.Series(True, index=df_caixa.index)
+                
+                df_filtrado = df_caixa[mask_datas & mask_bancos].copy()
+                
+                st.write(f"📌 Exibindo **{len(df_filtrado)}** lançamentos da conta **{banco_filtro}** no período selecionado.")
+                
+                if not df_filtrado.empty:
+                    df_view = df_filtrado[colunas_necessarias].copy()
+                    
+                    df_editado = st.data_editor(
+                        df_view,
+                        column_config={
+                            "Data": st.column_config.TextColumn("Data", disabled=True),
+                            "Conta/Banco": st.column_config.TextColumn("Banco", disabled=True),
+                            "Tipo": st.column_config.TextColumn("Tipo", disabled=True),
+                            "Valor": st.column_config.TextColumn("Valor", disabled=True),
+                            "Descricao_Original": st.column_config.TextColumn("Histórico Extrato", disabled=True),
+                            "Categoria_Gerencial": st.column_config.TextColumn("Categoria Dash", disabled=True),
+                            "Conta_Debito": st.column_config.TextColumn("Débito (Duplo Clique)"),
+                            "Conta_Credito": st.column_config.TextColumn("Crédito (Duplo Clique)"),
+                        },
+                        use_container_width=True,
+                        num_rows="fixed",
+                        key="editor_contabil"
+                    )
+                    
+                    st.divider()
+                    col_info, col_save = st.columns([2, 2])
+                    
+                    with col_info:
+                        st.info("💡 Dê 2 cliques na célula para editar a conta. Depois, clique em Salvar para gravar na base de dados.")
+                        
+                    with col_save:
+                        if st.button("💾 Salvar Correções na Planilha Central", type="secondary", use_container_width=True):
+                            with st.spinner("Gravando alterações..."):
+                                try:
+                                    df_caixa.loc[df_editado.index, 'Conta_Debito'] = df_editado['Conta_Debito']
+                                    df_caixa.loc[df_editado.index, 'Conta_Credito'] = df_editado['Conta_Credito']
+                                    
+                                    df_caixa = df_caixa.drop(columns=['Data_Filtro'])
+                                    df_caixa = df_caixa.fillna("").astype(str)
+                                    
+                                    dados_salvar = [df_caixa.columns.values.tolist()] + df_caixa.values.tolist()
+                                    
+                                    aba_caixa.clear()
+                                    aba_caixa.append_rows(dados_salvar)
+                                    
+                                    st.success("Alterações salvas com sucesso!")
+                                    time.sleep(1.2)
+                                    st.rerun()
+                                except Exception as err_sheets:
+                                    st.error(f"Erro ao salvar dados: {err_sheets}")
+                else:
+                    st.warning("Nenhum lançamento encontrado neste intervalo.")
+            else:
+                st.caption("A base central de caixas e bancos está vazia.")
+                
+        except Exception as e:
+            st.error(f"Erro ao processar tela contábil: {e}")
     # --- TELA 4: DASHBOARD ---
     elif modulo == "📊 Dashboard Executivo":
         st.title("📊 Visão Consolidada das Obras")
