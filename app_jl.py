@@ -13,6 +13,16 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests
 
+from inter_sdk_python.billing.models.BillingIssueRequest import BillingIssueRequest
+from inter_sdk_python.billing.models.Person import Person 
+try:
+    from inter_sdk_python.commons.models.PersonType import PersonType
+except:
+    from enum import Enum
+    class PersonType(Enum):
+        FISICA = "FISICA"
+        JURIDICA = "JURIDICA"
+
 # ==========================================
 # 1. CONFIGURAÇÕES GLOBAIS - J&L INCORPORADORA
 # ==========================================
@@ -312,6 +322,93 @@ def buscar_inter_api(str_data_ini, str_data_fim):
     except Exception as e:
         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
         raise e
+
+def emitir_boletos_lote(df_boletos):
+    """Gera boletos no Banco Inter a partir de um DataFrame e retorna os PDFs."""
+    caminho_pfx_temp = None
+    resultados = []
+    
+    try:
+        creds_inter = st.secrets["inter_api"]
+        client_id = creds_inter["client_id"]
+        client_secret = creds_inter["client_secret"]
+        senha_pfx = creds_inter["pfx_senha"]
+        conta = creds_inter["conta_corrente"]
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pfx') as tmp_pfx:
+            tmp_pfx.write(base64.b64decode(creds_inter["pfx_base64"]))
+            caminho_pfx_temp = tmp_pfx.name
+            
+        from inter_sdk_python.InterSdk import InterSdk 
+        motor = InterSdk(
+            environment="PRODUCTION", 
+            client_id=client_id, 
+            client_secret=client_secret,
+            certificate=caminho_pfx_temp, 
+            certificate_password=senha_pfx
+        )
+        motor.set_account(conta.replace("-",""))
+        
+        from decimal import Decimal
+        
+        for index, row in df_boletos.iterrows():
+            nome_cliente = str(row['Nome_Cliente']).strip()[:100]
+            cpf_limpo = re.sub(r'\D', '', str(row['CPF_CNPJ']))
+            controle = re.sub(r'[^a-zA-Z0-9]', '', str(row['seuNumero']))[:14] + "S"
+            
+            try:
+                data_vencimento = pd.to_datetime(row['Vencimento']).strftime('%Y-%m-%d')
+            except:
+                resultados.append({"Cliente": nome_cliente, "Status": "Erro", "Motivo": "Data Inválida", "PDF": None})
+                continue
+
+            try:
+                # Monta Pagador
+                pagador = Person()
+                pagador.nome = pagador.name = nome_cliente
+                pagador.cpf_cnpj = pagador.cpfCnpj = cpf_limpo
+                pagador.cep = pagador.zip_code = pagador.zipCode = re.sub(r'\D', '', str(row['CEP']))
+                pagador.numero = pagador.number = str(row['Número']).strip() if not pd.isna(row['Número']) else "0"
+                pagador.endereco = pagador.address = pagador.logradouro = "Logradouro"
+                pagador.cidade = pagador.city = "Cidade"
+                pagador.uf = pagador.state = "MG"
+                pagador.bairro = pagador.neighborhood = "Bairro"
+                pagador.tipo_pessoa = pagador.personType = PersonType.FISICA if len(cpf_limpo) <= 11 else PersonType.JURIDICA
+
+                # Monta Boleto
+                boleto = BillingIssueRequest()
+                boleto.seu_numero = boleto.seuNumero = controle
+                boleto.valor_nominal = boleto.valorNominal = Decimal(str(round(row['Valor'], 2)))
+                boleto.data_vencimento = boleto.dataVencimento = data_vencimento
+                boleto.pagador = boleto.payer = pagador
+                boleto.num_dias_agenda = 0
+
+                # Emissão
+                res = motor.billing().issue_billing(boleto)
+                n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None)
+                
+                if n_num:
+                    time.sleep(3) # Pausa para o banco renderizar
+                    pdf_path = os.path.join(tempfile.gettempdir(), f"{controle}.pdf")
+                    motor.billing().retrieve_billing_pdf(str(n_num), file=pdf_path)
+                    
+                    with open(pdf_path, "rb") as f:
+                        pdf_bytes = f.read()
+                        
+                    resultados.append({"Cliente": nome_cliente, "Nosso Número": n_num, "Status": "Sucesso", "PDF": pdf_bytes})
+                    
+            except Exception as e:
+                erro_msg = str(e)
+                if hasattr(e, 'error') and e.error: erro_msg = e.error.detail
+                resultados.append({"Cliente": nome_cliente, "Status": "Rejeitado", "Motivo": erro_msg, "PDF": None})
+                
+        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
+        return resultados
+        
+    except Exception as e:
+        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
+        st.error(f"Erro fatal de conexão: {e}")
+        return None
 # ==========================================
 # ==========================================
 # 3. INTERFACE VISUAL E NAVEGAÇÃO
@@ -329,6 +426,7 @@ else:
         "📝 Exportação Contábil (Domínio)",
         "📥 Auditoria de Obras (SIEG)",
         "📊 Dashboard Executivo"
+        "💸 Faturamento e Boletos"
     ])
     
     st.sidebar.divider()
@@ -495,3 +593,52 @@ else:
         st.write("Acompanhamento de fluxo financeiro.")
         st.title("📊 Visão Consolidada das Obras")
         st.write("Acompanhamento de fluxo financeiro.")
+        
+    # --- TELA 5: FATURAMENTO (BOLETOS) ---
+    elif modulo == "💸 Faturamento e Boletos":
+        st.title("💸 Gestão de Recebíveis e Emissão")
+        st.markdown("Leia os clientes direto da planilha do Google Drive e emita os boletos.")
+        
+        # Lê a planilha de 2026 (usando a variável que já estava no seu código original)
+        mes_faturamento = st.selectbox("Selecione a Aba (Mês):", ["Julho", "Agosto", "Setembro", "Outubro"])
+        
+        if st.button("📥 Carregar Clientes da Planilha"):
+            with st.spinner("Conectando ao Google Drive..."):
+                try:
+                    client_gspread = obter_cliente_sheets()
+                    planilha_2026 = client_gspread.open_by_key(ID_PLANILHA_Recebimento_Wilson_Moreira_2026)
+                    aba_mes = planilha_2026.worksheet(mes_faturamento)
+                    
+                    dados = aba_mes.get_all_records()
+                    if dados:
+                        df_clientes = pd.DataFrame(dados)
+                        st.session_state['df_boletos_pendentes'] = df_clientes
+                        st.success("Planilha carregada com sucesso!")
+                    else:
+                        st.warning("A aba selecionada está vazia.")
+                except Exception as e:
+                    st.error(f"Erro ao ler a planilha: {e}")
+                    
+        if 'df_boletos_pendentes' in st.session_state:
+            df_mostrar = st.session_state['df_boletos_pendentes']
+            st.dataframe(df_mostrar)
+            
+            st.warning("⚠️ Certifique-se de que a planilha possui as colunas exatas: Nome_Cliente, CPF_CNPJ, seuNumero, Vencimento, Valor, CEP, Número.")
+            
+            if st.button("🚀 Emitir Boletos Selecionados (Banco Inter)", type="primary"):
+                with st.spinner("Processando lote de boletos no Banco Inter. Isso pode levar alguns minutos..."):
+                    resultados = emitir_boletos_lote(df_mostrar)
+                    
+                    if resultados:
+                        st.subheader("📊 Resultado da Emissão")
+                        for r in resultados:
+                            if r["Status"] == "Sucesso":
+                                st.success(f"✅ {r['Cliente']} - Nosso Número: {r['Nosso Número']}")
+                                st.download_button(
+                                    label=f"⬇️ Baixar PDF - {r['Cliente']}",
+                                    data=r["PDF"],
+                                    file_name=f"Boleto_{r['Cliente']}.pdf",
+                                    mime="application/pdf"
+                                )
+                            else:
+                                st.error(f"❌ {r['Cliente']} - Falhou: {r['Motivo']}")
