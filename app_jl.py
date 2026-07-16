@@ -643,13 +643,13 @@ else:
                                 )
                             else:
                                 st.error(f"❌ {r['Cliente']} - Falhou: {r['Motivo']}")
-# --- TELA SECRETA 6: TRANSBORDO DE DADOS ---
+# --- TELA SECRETA 6: TRANSBORDO DE DADOS (VERSÃO DEFINITIVA LINHA 3) ---
     elif modulo == "⚙️ Engenharia (Transbordo)":
-        st.title("⚙️ Transbordo de Recebíveis (2022-2026)")
-        st.warning("⚠️ Esta função deve ser rodada apenas UMA VEZ para criar o banco de dados central.")
+        st.title("⚙️ Transbordo de Recebíveis (Leitura Mês a Mês)")
+        st.markdown("Lendo diretamente a partir da **Linha 3** para capturar o Livro Razão exato.")
 
-        if st.button("🚀 Iniciar Transbordo Histórico", type="primary"):
-            with st.spinner("Lendo 5 anos de histórico. Isso vai demorar um pouco..."):
+        if st.button("🚀 Iniciar Transbordo Histórico com Datas", type="primary"):
+            with st.spinner("Abrindo planilhas e extraindo dados a partir da linha 3. Aguarde..."):
                 planilhas_ids = {
                     "2022": ID_PLANILHA_Recebimento_Wilson_Moreira_2022,
                     "2023": ID_PLANILHA_Recebimento_Wilson_Moreira_2023,
@@ -660,78 +660,86 @@ else:
                 
                 client_gspread = obter_cliente_sheets()
                 if not client_gspread:
-                    st.error("Sem conexão com o Sheets.")
+                    st.error("Sem conexão com o Google Sheets.")
                     st.stop()
                     
                 banco_de_dados_geral = []
 
-                # MESES PARA PROCURAR NAS COLUNAS
-                meses_chaves = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 
-                                'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
-
                 for ano, sheet_id in planilhas_ids.items():
                     try:
                         planilha = client_gspread.open_by_key(sheet_id)
-                        # Busca todas as abas, focando nos meses (ignora a aba resumo na varredura fina)
                         abas = planilha.worksheets()
                         
                         for aba in abas:
                             nome_aba = aba.title.lower()
-                            # Se for uma aba mensal ou uma aba geral com colunas de meses
-                            dados = aba.get_all_records()
-                            df_aba = pd.DataFrame(dados)
                             
-                            if df_aba.empty or 'NOME DO ADQUIRENTE' not in df_aba.columns:
+                            # Ignora as abas totalizadoras
+                            if "resumo" in nome_aba or "planilha" in nome_aba or "totais" in nome_aba:
                                 continue
                                 
-                            # Identifica colunas que representam meses de pagamento
-                            colunas_pagamento = [col for col in df_aba.columns if any(mes in str(col).lower() for mes in meses_chaves)]
+                            linhas_brutas = aba.get_all_values()
                             
-                            for index, row in df_aba.iterrows():
-                                cliente = row.get('NOME DO ADQUIRENTE', '')
-                                cpf = row.get('CPF DO ADQUIRENTE', '')
-                                contrato = row.get('Nº CONTRATO', '')
-                                unidade = row.get('DESCRIÇÃO RESUMIDA DA UNIDADE', '')
-                                valor_unidade = row.get('VALOR DA UNIDADE', 0)
+                            # Se a aba tiver menos de 3 linhas, não tem tabela útil
+                            if len(linhas_brutas) < 3:
+                                continue
                                 
-                                if not cliente: continue # Pula linhas vazias
+                            # FIXANDO O CABEÇALHO NA LINHA 3 (Índice 2)
+                            cabecalho = [str(col).strip().upper() for col in linhas_brutas[2]]
+                            dados_tabela = linhas_brutas[3:]
+                            
+                            if not dados_tabela:
+                                continue
                                 
-                                # Varre cada coluna de mês daquela linha
-                                for col_mes in colunas_pagamento:
-                                    valor_pago = row[col_mes]
+                            df_aba = pd.DataFrame(dados_tabela, columns=cabecalho)
+                            
+                            # Remove colunas vazias
+                            df_aba = df_aba.loc[:, df_aba.columns.notnull() & (df_aba.columns != '')]
+                            
+                            if 'NOME DO ADQUIRENTE' in df_aba.columns and ('DATA PAGAMENTO' in df_aba.columns or 'VALOR RECEBIDO' in df_aba.columns):
+                                
+                                for index, row in df_aba.iterrows():
+                                    cliente = str(row.get('NOME DO ADQUIRENTE', '')).strip()
+                                    data_pagamento = str(row.get('DATA PAGAMENTO', '')).strip()
+                                    valor_bruto = str(row.get('VALOR RECEBIDO', ''))
                                     
-                                    # Limpeza do valor (tira R$, formata)
-                                    v_limpo = str(valor_pago).replace('R$', '').replace('.', '').replace(',', '.').strip()
+                                    # Pula linhas em branco ou sem data preenchida
+                                    if not cliente or not data_pagamento or data_pagamento.lower() == 'nan': 
+                                        continue
+                                        
+                                    v_limpo = valor_bruto.replace('R$', '').replace('.', '').replace(',', '.').strip()
                                     try:
                                         v_float = float(v_limpo)
                                     except:
                                         v_float = 0.0
                                         
-                                    if v_float > 0: # SÓ REGISTRA SE HOUVE PAGAMENTO REAL (Regime de Caixa)
-                                        # Tenta extrair o mês/ano exato da coluna ou da aba
-                                        data_ref = f"{col_mes} {ano}" if str(ano) not in str(col_mes) else str(col_mes)
-                                        
+                                    if v_float > 0: # REGIME DE CAIXA
                                         linha_bd = {
-                                            "Contrato": contrato,
-                                            "Unidade": unidade,
-                                            "Valor_Total_Unidade": valor_unidade,
+                                            "Ano_Origem": ano,
+                                            "Mes_Aba": aba.title,
                                             "Cliente": cliente,
-                                            "CPF_CNPJ": cpf,
-                                            "Data_Pagamento": data_ref,
+                                            "Contrato": str(row.get('Nº CONTRATO', '')),
+                                            "Unidade": str(row.get('DESCRIÇÃO RESUMIDA DA UNIDADE', '')),
+                                            "Data_Vencimento_Original": str(row.get('DATA VENCIMENTO', '')),
+                                            "Data_Pagamento": data_pagamento,
                                             "Valor_Recebido": v_float,
-                                            "Ano_Origem": ano
+                                            "Conta_Recebimento": str(row.get('CONTA DE RECEBIMENTO', '')),
+                                            "Forma_Pagamento": str(row.get('FORMA DE PAGAMENTO', ''))
                                         }
                                         banco_de_dados_geral.append(linha_bd)
                                         
                     except Exception as e:
-                        st.error(f"Erro ao processar ano {ano}: {e}")
+                        st.error(f"Aviso: Erro ao processar as abas do ano {ano}. Detalhe: {e}")
 
                 if banco_de_dados_geral:
                     df_final = pd.DataFrame(banco_de_dados_geral)
-                    st.success(f"Transbordo Concluído! {len(df_final)} pagamentos individuais encontrados.")
-                    st.dataframe(df_final)
                     
-                    # Aqui, futuramente, adicionaremos o código para injetar esse df_final na "Recebimentos_Master"
-                    st.info("⬆️ Veja a tabela acima. Cada linha é um recebimento único. Esta é a arquitetura perfeita.")
+                    try:
+                        df_final['Data_Pagamento_FMT'] = pd.to_datetime(df_final['Data_Pagamento'], errors='coerce', dayfirst=True)
+                        df_final = df_final.sort_values(by='Data_Pagamento_FMT').drop(columns=['Data_Pagamento_FMT'])
+                    except: pass
+
+                    st.success(f"✅ Transbordo Concluído! {len(df_final)} liquidações exatas extraídas do histórico.")
+                    st.dataframe(df_final, hide_index=True)
+                    st.info("⬆️ Esta é a base perfeita para cruzamento de impostos e geração de boletos. Cada linha representa uma entrada real no extrato.")
                 else:
-                    st.warning("Nenhum dado encontrado para transbordo.")
+                    st.warning("A varredura foi concluída, mas nenhuma linha válida foi encontrada na linha 3 em diante.")
