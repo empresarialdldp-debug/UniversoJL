@@ -425,8 +425,9 @@ else:
         "🏦 Tesouraria Central (Inter e BB)",
         "📝 Exportação Contábil (Domínio)",
         "📥 Auditoria de Obras (SIEG)",
-        "📊 Dashboard Executivo"
+        "📊 Dashboard Executivo",
         "💸 Faturamento e Boletos"
+        "⚙️ Engenharia (Transbordo)"
     ])
     
     st.sidebar.divider()
@@ -642,7 +643,7 @@ else:
                                 )
                             else:
                                 st.error(f"❌ {r['Cliente']} - Falhou: {r['Motivo']}")
-# --- TELA SECRETA: TRANSBORDO DE DADOS ---
+# --- TELA SECRETA 6: TRANSBORDO DE DADOS ---
     elif modulo == "⚙️ Engenharia (Transbordo)":
         st.title("⚙️ Transbordo de Recebíveis (2022-2026)")
         st.warning("⚠️ Esta função deve ser rodada apenas UMA VEZ para criar o banco de dados central.")
