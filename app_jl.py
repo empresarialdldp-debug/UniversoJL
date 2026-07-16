@@ -426,7 +426,7 @@ else:
         "📝 Exportação Contábil (Domínio)",
         "📥 Auditoria de Obras (SIEG)",
         "📊 Dashboard Executivo",
-        "💸 Faturamento e Boletos"
+        "💸 Faturamento e Boletos",
         "⚙️ Engenharia (Transbordo)"
     ])
     
