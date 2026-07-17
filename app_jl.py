@@ -588,104 +588,136 @@ else:
                 st.caption("A base central está vazia.")
         except Exception as e:
             st.error(f"Erro ao processar tela contábil: {e}")
-    # --- TELA 4: DASHBOARD EXECUTIVO ---
+    # --- TELA 4: DASHBOARD EXECUTIVO (COM BOTÃO DE CORREÇÃO) ---
     elif modulo == "📊 Dashboard Executivo":
         st.title("📊 Painel de Recebíveis - Wilson Moreira")
-        st.markdown("Cruzamento automático do Livro Razão com os contratos: acompanhe os **somatórios** e o **saldo devedor** em tempo real.")
+        st.markdown("Acompanhe os recebimentos e lance **Documentação ou Correções** diretamente no saldo contratado.")
 
-        with st.spinner("Consolidando milhares de lançamentos e calculando saldos..."):
-            try:
-                client_gspread = obter_cliente_sheets()
+        client_gspread = obter_cliente_sheets()
+        if not client_gspread:
+            st.error("Sem conexão com o Google Sheets.")
+            st.stop()
+            
+        planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
+
+        # ==========================================
+        # 1. PAINEL DE AJUSTES (A SUA IDEIA)
+        # ==========================================
+        st.subheader("🛠️ Lançar Documentação ou Correção")
+        with st.expander("Clique para adicionar um valor ao saldo de um cliente"):
+            with st.form("form_correcao", clear_on_submit=True):
+                col1, col2, col3 = st.columns(3)
                 
-                # 1. PUXA OS PAGAMENTOS (Livro Razão)
-                planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
+                # Para evitar digitar errado, pegamos a lista de clientes da planilha 2026
+                try:
+                    p_2026 = client_gspread.open_by_key(ID_PLANILHA_Recebimento_Wilson_Moreira_2026)
+                    aba_2026 = p_2026.worksheet("Julho") # Pega um mês recente como base
+                    df_lista = pd.DataFrame(aba_2026.get_all_records())
+                    lista_clientes = df_lista['NOME DO ADQUIRENTE'].dropna().unique().tolist()
+                except:
+                    lista_clientes = ["Digite o nome do cliente..."] # Fallback
+
+                cliente_ajuste = col1.selectbox("Selecione o Cliente:", [c for c in lista_clientes if str(c).strip() != ""])
+                motivo_ajuste = col2.text_input("Motivo (Ex: Documentação, Correção):")
+                valor_ajuste = col3.number_input("Valor a adicionar (R$):", min_value=0.0, step=100.0)
+                
+                btn_salvar_ajuste = st.form_submit_button("💾 Salvar Correção no Contrato")
+                
+                if btn_salvar_ajuste and cliente_ajuste and valor_ajuste > 0:
+                    try:
+                        # Tenta abrir a aba de Ajustes, se não existir, ele cria na hora
+                        try:
+                            aba_ajustes = planilha_master.worksheet("Ajustes_Contratos")
+                        except:
+                            aba_ajustes = planilha_master.add_worksheet(title="Ajustes_Contratos", rows="100", cols="4")
+                            aba_ajustes.append_row(["Data_Registro", "Cliente", "Motivo", "Valor_Ajuste"])
+                            
+                        aba_ajustes.append_row([datetime.date.today().strftime('%d/%m/%Y'), cliente_ajuste, motivo_ajuste, valor_ajuste])
+                        st.success(f"Acrescimo de R$ {valor_ajuste} salvo com sucesso para {cliente_ajuste}!")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao salvar ajuste: {e}")
+
+        st.divider()
+
+        # ==========================================
+        # 2. CONSOLIDAÇÃO E MATEMÁTICA DO DASHBOARD
+        # ==========================================
+        with st.spinner("Consolidando Livro Razão, Contratos e Correções..."):
+            try:
+                # A. PAGAMENTOS (Livro Razão)
                 aba_recebimentos = planilha_master.worksheet("Recebimentos_Master")
                 df_pagamentos = pd.DataFrame(aba_recebimentos.get_all_records())
-                
-                if df_pagamentos.empty:
-                    st.warning("Nenhum dado encontrado na aba Recebimentos_Master.")
-                    st.stop()
-                    
-                # Limpa os valores recebidos para o Python conseguir somar
                 df_pagamentos['Valor_Recebido'] = pd.to_numeric(df_pagamentos['Valor_Recebido'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-                
-                # Agrupa tudo: Soma o que cada cliente já pagou até hoje
-                df_resumo_pago = df_pagamentos.groupby(['Cliente', 'Unidade'])['Valor_Recebido'].sum().reset_index()
-                df_resumo_pago = df_resumo_pago.rename(columns={'Valor_Recebido': 'Total_Pago'})
+                df_resumo_pago = df_pagamentos.groupby('Cliente')['Valor_Recebido'].sum().reset_index()
+                df_resumo_pago.rename(columns={'Valor_Recebido': 'Total_Pago'}, inplace=True)
 
-                # 2. PUXA O VALOR DOS CONTRATOS (Da planilha de 2026)
-                planilha_2026 = client_gspread.open_by_key(ID_PLANILHA_Recebimento_Wilson_Moreira_2026)
-                abas_2026 = planilha_2026.worksheets()
+                # B. VALOR DOS CONTRATOS (Da planilha de 2026)
                 df_contratos = pd.DataFrame()
-                
-                # O robô vasculha a planilha 2026 atrás do cabeçalho com o Valor da Unidade
-                for aba in abas_2026:
+                for aba in p_2026.worksheets():
                     dados_aba = aba.get_all_values()
                     if len(dados_aba) > 3:
-                        cabecalho = [str(c).strip().upper() for c in dados_aba[2]]
-                        if "NOME DO ADQUIRENTE" in cabecalho and "VALOR DA UNIDADE" in cabecalho:
-                            df_temp = pd.DataFrame(dados_aba[3:], columns=cabecalho)
+                        cab = [str(c).strip().upper() for c in dados_aba[2]]
+                        if "NOME DO ADQUIRENTE" in cab and "VALOR DA UNIDADE" in cab:
+                            df_temp = pd.DataFrame(dados_aba[3:], columns=cab)
                             df_contratos = df_temp[['NOME DO ADQUIRENTE', 'VALOR DA UNIDADE']].copy()
                             break 
                             
-                if not df_contratos.empty:
-                    df_contratos = df_contratos.rename(columns={'NOME DO ADQUIRENTE': 'Cliente'})
-                    # Limpa o texto da moeda
-                    df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.')
-                    df_contratos['VALOR DA UNIDADE'] = pd.to_numeric(df_contratos['VALOR DA UNIDADE'], errors='coerce').fillna(0)
-                    
-                    # Remove duplicidade de clientes na base
-                    df_contratos = df_contratos[df_contratos['Cliente'] != ""].drop_duplicates(subset=['Cliente'])
+                df_contratos.rename(columns={'NOME DO ADQUIRENTE': 'Cliente'}, inplace=True)
+                df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.')
+                df_contratos['VALOR DA UNIDADE'] = pd.to_numeric(df_contratos['VALOR DA UNIDADE'], errors='coerce').fillna(0)
+                df_contratos = df_contratos[df_contratos['Cliente'] != ""].drop_duplicates(subset=['Cliente'])
 
-                    # 3. O CRUZAMENTO (Match Pagamentos vs Contrato)
-                    df_dashboard = pd.merge(df_resumo_pago, df_contratos, on='Cliente', how='left')
-                    df_dashboard['VALOR DA UNIDADE'] = df_dashboard['VALOR DA UNIDADE'].fillna(0)
-                else:
-                    df_dashboard = df_resumo_pago.copy()
-                    df_dashboard['VALOR DA UNIDADE'] = 0.0
+                # C. CORREÇÕES (Ajustes inseridos pelo seu botão)
+                try:
+                    aba_ajustes = planilha_master.worksheet("Ajustes_Contratos")
+                    df_aj = pd.DataFrame(aba_ajustes.get_all_records())
+                    df_aj['Valor_Ajuste'] = pd.to_numeric(df_aj['Valor_Ajuste'].astype(str).replace(',', '.'), errors='coerce').fillna(0)
+                    df_resumo_ajustes = df_aj.groupby('Cliente')['Valor_Ajuste'].sum().reset_index()
+                except:
+                    df_resumo_ajustes = pd.DataFrame(columns=['Cliente', 'Valor_Ajuste'])
 
-                # 4. A MATEMÁTICA DO SALDO DEVEDOR
-                df_dashboard['Saldo_Devedor'] = df_dashboard['VALOR DA UNIDADE'] - df_dashboard['Total_Pago']
-                # Se alguém pagou 1 centavo a mais por arredondamento, zera o saldo devedor
-                df_dashboard['Saldo_Devedor'] = df_dashboard['Saldo_Devedor'].apply(lambda x: x if x > 0 else 0)
+                # D. O GRANDE CRUZAMENTO
+                df_dash = pd.merge(df_contratos, df_resumo_ajustes, on='Cliente', how='left').fillna(0)
+                df_dash = pd.merge(df_dash, df_resumo_pago, on='Cliente', how='left').fillna(0)
 
-                # --- 5. EXIBIÇÃO DOS INDICADORES (KPIs) ---
-                vgv_total = df_dashboard['VALOR DA UNIDADE'].sum()
-                recebido_total = df_dashboard['Total_Pago'].sum()
-                devedor_total = df_dashboard['Saldo_Devedor'].sum()
+                # A Matemática Final
+                df_dash['Valor_Atualizado'] = df_dash['VALOR DA UNIDADE'] + df_dash['Valor_Ajuste']
+                df_dash['Saldo_Devedor'] = df_dash['Valor_Atualizado'] - df_dash['Total_Pago']
+                df_dash['Saldo_Devedor'] = df_dash['Saldo_Devedor'].apply(lambda x: x if x > 0 else 0)
 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("💰 VGV (Total dos Contratos)", f"R$ {vgv_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                col2.metric("✅ Caixa Realizado (Total Recebido)", f"R$ {recebido_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                col3.metric("⚠️ Saldo Devedor (A Receber)", f"R$ {devedor_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                # KPIs 
+                vgv_total = df_dash['Valor_Atualizado'].sum()
+                recebido_total = df_dash['Total_Pago'].sum()
+                devedor_total = df_dash['Saldo_Devedor'].sum()
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("💰 VGV Atualizado (Com Documentação)", f"R$ {vgv_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                c2.metric("✅ Caixa Realizado (Total Recebido)", f"R$ {recebido_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                c3.metric("⚠️ Saldo Devedor (A Receber)", f"R$ {devedor_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                 
-                st.divider()
-
-                # --- 6. TABELA DINÂMICA COM PROGRESSO ---
+                # Tabela Visual
                 st.subheader("Situação Individualizada por Investidor")
-                
-                df_visual = df_dashboard[['Cliente', 'Unidade', 'VALOR DA UNIDADE', 'Total_Pago', 'Saldo_Devedor']].copy()
-                
-                # Cria a coluna de percentual de quitação
-                df_visual['Progresso'] = (df_visual['Total_Pago'] / df_visual['VALOR DA UNIDADE']) * 100
+                df_visual = df_dash[['Cliente', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
+                df_visual['Progresso'] = (df_visual['Total_Pago'] / df_visual['Valor_Atualizado']) * 100
                 df_visual['Progresso'] = df_visual['Progresso'].fillna(0).clip(upper=100)
                 
                 st.dataframe(
                     df_visual,
                     column_config={
-                        "Cliente": st.column_config.TextColumn("Nome do Adquirente"),
-                        "Unidade": st.column_config.TextColumn("Unidade"),
-                        "VALOR DA UNIDADE": st.column_config.NumberColumn("Valor do Contrato", format="R$ %.2f"),
-                        "Total_Pago": st.column_config.NumberColumn("Soma dos Pagamentos", format="R$ %.2f"),
+                        "Cliente": st.column_config.TextColumn("Investidor"),
+                        "VALOR DA UNIDADE": st.column_config.NumberColumn("Contrato Original", format="R$ %.2f"),
+                        "Valor_Ajuste": st.column_config.NumberColumn("+ Correções/Doc", format="R$ %.2f"),
+                        "Valor_Atualizado": st.column_config.NumberColumn("Total Atualizado", format="R$ %.2f"),
+                        "Total_Pago": st.column_config.NumberColumn("Pago", format="R$ %.2f"),
                         "Saldo_Devedor": st.column_config.NumberColumn("Saldo Devedor", format="R$ %.2f"),
-                        "Progresso": st.column_config.ProgressColumn("Quitação (%)", format="%.1f %%", min_value=0, max_value=100)
+                        "Progresso": st.column_config.ProgressColumn("Quitação", format="%.1f %%", min_value=0, max_value=100)
                     },
-                    hide_index=True,
-                    use_container_width=True
+                    hide_index=True, use_container_width=True
                 )
-                
             except Exception as e:
-                st.error(f"Erro ao montar o dashboard: {e}")
+                st.error(f"Erro ao processar o Dashboard: {e}")
         
     # --- TELA 5: FATURAMENTO (BOLETOS) ---
     elif modulo == "💸 Faturamento e Boletos":
