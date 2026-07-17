@@ -644,11 +644,10 @@ else:
                             else:
                                 st.error(f"❌ {r['Cliente']} - Falhou: {r['Motivo']}")
 # --- TELA SECRETA 6: TRANSBORDO DE DADOS (VERSÃO DEFINITIVA LINHA 3) ---
-
   
     elif modulo == "⚙️ Engenharia (Transbordo)":
         st.title("⚙️ Transbordo de Recebíveis (Leitura Mês a Mês)")
-        st.markdown("Varrendo o histórico detalhado em busca das **Datas de Pagamento** exatas para o Livro Razão.")
+        st.markdown("Varrendo o histórico detalhado em busca das **Datas** e **Valores** exatos para o Livro Razão.")
 
         if st.button("🚀 Iniciar Transbordo Histórico com Datas", type="primary"):
             with st.spinner("Motor blindado ativado: Caçando cabeçalhos e ignorando colunas vazias..."):
@@ -685,40 +684,35 @@ else:
                             linhas_brutas = aba.get_all_values()
                             if len(linhas_brutas) < 2: continue
                             
-                            # 1. O CAÇADOR DE CABEÇALHOS (Acha a linha exata não importa onde esteja)
+                            # 1. O CAÇADOR DE CABEÇALHOS (Agora buscando "DATA" e "VALOR")
                             linha_cab = -1
                             cabecalho_limpo = []
                             for i, row in enumerate(linhas_brutas):
-                                # Limpa espaços extras e padroniza
                                 cols = [re.sub(r'\s+', ' ', str(c)).strip().upper() for c in row]
-                                if "NOME DO ADQUIRENTE" in cols and "VALOR RECEBIDO" in cols:
+                                # Correção: Procurando os nomes exatos da sua imagem
+                                if "NOME DO ADQUIRENTE" in cols and "VALOR" in cols and "DATA" in cols:
                                     linha_cab = i
                                     cabecalho_limpo = cols
                                     break
                                     
                             if linha_cab == -1:
-                                continue # Não é uma aba de pagamentos válida
+                                continue 
                                 
                             log_abas_lidas.append(f"{ano} - {aba.title}")
                             
-                            # 2. MAPEAMENTO DE ÍNDICES (Imune a colunas vazias duplicadas)
+                            # 2. MAPEAMENTO DE ÍNDICES 
                             try:
                                 idx_cliente = cabecalho_limpo.index('NOME DO ADQUIRENTE')
-                                idx_data = cabecalho_limpo.index('DATA PAGAMENTO') if 'DATA PAGAMENTO' in cabecalho_limpo else -1
-                                idx_valor = cabecalho_limpo.index('VALOR RECEBIDO')
+                                idx_data = cabecalho_limpo.index('DATA')
+                                idx_valor = cabecalho_limpo.index('VALOR')
                                 idx_contrato = cabecalho_limpo.index('Nº CONTRATO') if 'Nº CONTRATO' in cabecalho_limpo else -1
                                 idx_unidade = cabecalho_limpo.index('DESCRIÇÃO RESUMIDA DA UNIDADE') if 'DESCRIÇÃO RESUMIDA DA UNIDADE' in cabecalho_limpo else -1
-                                idx_conta = cabecalho_limpo.index('CONTA DE RECEBIMENTO') if 'CONTA DE RECEBIMENTO' in cabecalho_limpo else -1
-                                idx_forma = cabecalho_limpo.index('FORMA DE PAGAMENTO') if 'FORMA DE PAGAMENTO' in cabecalho_limpo else -1
                             except ValueError:
                                 continue
-                                
-                            # Se não tem coluna de data de pagamento, ignora
-                            if idx_data == -1: continue
 
                             dados_tabela = linhas_brutas[linha_cab + 1:]
                             
-                            # 3. EXTRAÇÃO DIRETA (Sem usar Pandas para evitar crash)
+                            # 3. EXTRAÇÃO DIRETA 
                             for row in dados_tabela:
                                 # Preenche a linha com vazio se for menor que o cabeçalho
                                 row = row + [''] * (len(cabecalho_limpo) - len(row))
@@ -743,9 +737,7 @@ else:
                                         "Contrato": str(row[idx_contrato]).strip() if idx_contrato != -1 else "",
                                         "Unidade": str(row[idx_unidade]).strip() if idx_unidade != -1 else "",
                                         "Data_Pagamento": data_pagamento,
-                                        "Valor_Recebido": v_float,
-                                        "Conta_Recebimento": str(row[idx_conta]).strip() if idx_conta != -1 else "",
-                                        "Forma_Pagamento": str(row[idx_forma]).strip() if idx_forma != -1 else ""
+                                        "Valor_Recebido": v_float
                                     })
                                     
                     except Exception as e:
@@ -764,5 +756,5 @@ else:
                     st.dataframe(df_final, hide_index=True)
                     st.info(f"Abas vasculhadas com sucesso e mapeadas: {len(log_abas_lidas)}")
                 else:
-                    st.warning("A varredura foi concluída, mas nenhuma linha com 'DATA PAGAMENTO' preenchida com valor foi encontrada.")
+                    st.warning("A varredura foi concluída, mas nenhuma linha com 'DATA' preenchida com valor foi encontrada.")
                     st.write("Abas que o sistema conseguiu ler e identificou a tabela:", log_abas_lidas)
