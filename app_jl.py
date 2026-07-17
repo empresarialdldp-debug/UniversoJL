@@ -645,13 +645,14 @@ else:
                                 st.error(f"❌ {r['Cliente']} - Falhou: {r['Motivo']}")
 # --- TELA SECRETA 6: TRANSBORDO DE DADOS (VERSÃO DEFINITIVA LINHA 3) ---
 
+
     elif modulo == "⚙️ Engenharia (Transbordo)":
         st.title("⚙️ Transbordo de Recebíveis (Leitura Mês a Mês)")
         st.markdown("Varrendo o histórico detalhado para criar o **Livro Razão Definitivo**.")
 
         # BOTÃO 1: LER AS PLANILHAS
         if st.button("🚀 Iniciar Transbordo Histórico com Datas", type="primary"):
-            with st.spinner("Motor blindado ativado: Caçando cabeçalhos e ignorando colunas vazias..."):
+            with st.spinner("Lendo planilhas. Sistema de anti-queda ativado..."):
                 planilhas_ids = {
                     "2022": ID_PLANILHA_Recebimento_Wilson_Moreira_2022,
                     "2023": ID_PLANILHA_Recebimento_Wilson_Moreira_2023,
@@ -668,65 +669,83 @@ else:
                 banco_de_dados_geral = []
                 log_abas_lidas = []
                 import re
+                import time
 
                 for ano, sheet_id in planilhas_ids.items():
-                    try:
-                        planilha = client_gspread.open_by_key(sheet_id)
-                        abas = planilha.worksheets()
-                        
-                        for aba in abas:
-                            nome_aba = aba.title.lower()
-                            if "resumo" in nome_aba or "planilha" in nome_aba or "totais" in nome_aba: continue
-                                
-                            linhas_brutas = aba.get_all_values()
-                            if len(linhas_brutas) < 2: continue
+                    # SISTEMA DE RETENTATIVA (Tenta 3 vezes se o Google der erro 503)
+                    sucesso_leitura = False
+                    tentativas = 0
+                    
+                    while not sucesso_leitura and tentativas < 3:
+                        try:
+                            planilha = client_gspread.open_by_key(sheet_id)
+                            abas = planilha.worksheets()
+                            sucesso_leitura = True # Se passou daqui, o Google liberou
                             
-                            linha_cab = -1
-                            cabecalho_limpo = []
-                            for i, row in enumerate(linhas_brutas):
-                                cols = [re.sub(r'\s+', ' ', str(c)).strip().upper() for c in row]
-                                if "NOME DO ADQUIRENTE" in cols and "VALOR" in cols and "DATA" in cols:
-                                    linha_cab = i
-                                    cabecalho_limpo = cols
-                                    break
+                            for aba in abas:
+                                nome_aba = aba.title.lower()
+                                if "resumo" in nome_aba or "planilha" in nome_aba or "totais" in nome_aba: continue
                                     
-                            if linha_cab == -1: continue 
+                                linhas_brutas = aba.get_all_values()
+                                if len(linhas_brutas) < 2: continue
                                 
-                            log_abas_lidas.append(f"{ano} - {aba.title}")
-                            
-                            try:
-                                idx_cliente = cabecalho_limpo.index('NOME DO ADQUIRENTE')
-                                idx_data = cabecalho_limpo.index('DATA')
-                                idx_valor = cabecalho_limpo.index('VALOR')
-                                idx_contrato = cabecalho_limpo.index('Nº CONTRATO') if 'Nº CONTRATO' in cabecalho_limpo else -1
-                                idx_unidade = cabecalho_limpo.index('DESCRIÇÃO RESUMIDA DA UNIDADE') if 'DESCRIÇÃO RESUMIDA DA UNIDADE' in cabecalho_limpo else -1
-                            except ValueError:
-                                continue
+                                linha_cab = -1
+                                cabecalho_limpo = []
+                                for i, row in enumerate(linhas_brutas):
+                                    cols = [re.sub(r'\s+', ' ', str(c)).strip().upper() for c in row]
+                                    if "NOME DO ADQUIRENTE" in cols and "VALOR" in cols and "DATA" in cols:
+                                        linha_cab = i
+                                        cabecalho_limpo = cols
+                                        break
+                                        
+                                if linha_cab == -1: continue 
+                                    
+                                log_abas_lidas.append(f"{ano} - {aba.title}")
+                                
+                                try:
+                                    idx_cliente = cabecalho_limpo.index('NOME DO ADQUIRENTE')
+                                    idx_cpf = cabecalho_limpo.index('CPF DO ADQUIRENTE') if 'CPF DO ADQUIRENTE' in cabecalho_limpo else -1
+                                    idx_data = cabecalho_limpo.index('DATA')
+                                    idx_valor = cabecalho_limpo.index('VALOR')
+                                    idx_contrato = cabecalho_limpo.index('Nº CONTRATO') if 'Nº CONTRATO' in cabecalho_limpo else -1
+                                    idx_unidade = cabecalho_limpo.index('DESCRIÇÃO RESUMIDA DA UNIDADE') if 'DESCRIÇÃO RESUMIDA DA UNIDADE' in cabecalho_limpo else -1
+                                except ValueError:
+                                    continue
 
-                            dados_tabela = linhas_brutas[linha_cab + 1:]
-                            
-                            for row in dados_tabela:
-                                row = row + [''] * (len(cabecalho_limpo) - len(row))
-                                cliente = str(row[idx_cliente]).strip()
-                                data_pagamento = str(row[idx_data]).strip()
-                                valor_bruto = str(row[idx_valor]).strip()
+                                dados_tabela = linhas_brutas[linha_cab + 1:]
                                 
-                                if not cliente or not data_pagamento or data_pagamento.lower() in ['nan', '-', '']: continue
+                                for row in dados_tabela:
+                                    row = row + [''] * (len(cabecalho_limpo) - len(row))
+                                    cliente = str(row[idx_cliente]).strip()
+                                    data_pagamento = str(row[idx_data]).strip()
+                                    valor_bruto = str(row[idx_valor]).strip()
                                     
-                                v_limpo = valor_bruto.replace('R$', '').replace('.', '').replace(',', '.').strip()
-                                try: v_float = float(v_limpo)
-                                except: v_float = 0.0
-                                
-                                if v_float > 0:
-                                    banco_de_dados_geral.append({
-                                        "Ano_Origem": ano, "Mes_Aba": aba.title, "Cliente": cliente,
-                                        "Contrato": str(row[idx_contrato]).strip() if idx_contrato != -1 else "",
-                                        "Unidade": str(row[idx_unidade]).strip() if idx_unidade != -1 else "",
-                                        "Data_Pagamento": data_pagamento, "Valor_Recebido": v_float
-                                    })
+                                    if not cliente or not data_pagamento or data_pagamento.lower() in ['nan', '-', '']: continue
+                                        
+                                    v_limpo = valor_bruto.replace('R$', '').replace('.', '').replace(',', '.').strip()
+                                    try: v_float = float(v_limpo)
+                                    except: v_float = 0.0
                                     
-                    except Exception as e:
-                        st.error(f"Aviso: Erro ao processar o ano {ano}. Detalhe: {e}")
+                                    if v_float > 0:
+                                        banco_de_dados_geral.append({
+                                            "Ano_Origem": ano, 
+                                            "Mes_Aba": aba.title, 
+                                            "Cliente": cliente,
+                                            "CPF_CNPJ": str(row[idx_cpf]).strip() if idx_cpf != -1 else "",
+                                            "Contrato": str(row[idx_contrato]).strip() if idx_contrato != -1 else "",
+                                            "Unidade": str(row[idx_unidade]).strip() if idx_unidade != -1 else "",
+                                            "Data_Pagamento": data_pagamento, 
+                                            "Valor_Recebido": v_float,
+                                            "ID_Transacao_Banco": "",      # Coluna preparada para os novos lançamentos
+                                            "Origem_Lancamento": "Histórico" # Identificador de auditoria
+                                        })
+                        except Exception as e:
+                            tentativas += 1
+                            if tentativas < 3:
+                                st.warning(f"O Google falhou no ano {ano} (Erro 503). Tentando novamente em 3 segundos... (Tentativa {tentativas}/3)")
+                                time.sleep(3)
+                            else:
+                                st.error(f"Aviso: Erro definitivo ao processar o ano {ano}. Detalhe: {e}")
 
                 if banco_de_dados_geral:
                     df_final = pd.DataFrame(banco_de_dados_geral)
@@ -735,7 +754,6 @@ else:
                         df_final = df_final.sort_values(by='Data_Pagamento_FMT').drop(columns=['Data_Pagamento_FMT'])
                     except: pass
                     
-                    # Salva na memória do aplicativo para não sumir
                     st.session_state['df_transbordo'] = df_final
                 else:
                     st.warning("Nenhuma linha encontrada.")
@@ -750,29 +768,25 @@ else:
             
             # BOTÃO 2: GRAVAR NO GOOGLE SHEETS
             if st.button("💾 GRAVAR NA PLANILHA MASTER", type="primary", use_container_width=True):
-                with st.spinner("Criando a aba 'Recebimentos_Master' e gravando 5 anos de histórico..."):
+                with st.spinner("Criando a aba 'Recebimentos_Master' e gravando o histórico..."):
                     try:
                         client_gspread = obter_cliente_sheets()
                         planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
                         
-                        # Tenta acessar a aba, se não existir, cria uma nova
                         try:
                             aba_master = planilha_master.worksheet("Recebimentos_Master")
-                            aba_master.clear() # Limpa se já tiver algo para não duplicar
+                            aba_master.clear() 
                         except:
                             aba_master = planilha_master.add_worksheet(title="Recebimentos_Master", rows="1000", cols="10")
                         
-                        # Prepara os dados (converte tudo para texto puro para evitar erros do Google)
                         df_salvar = df_mostrar.fillna("").astype(str)
                         dados_para_inserir = [df_salvar.columns.values.tolist()] + df_salvar.values.tolist()
                         
-                        # Injeta no Sheets
                         aba_master.append_rows(dados_para_inserir)
                         
                         st.success("🎉 Golaço! Os dados foram gravados com sucesso na sua Planilha Master.")
                         st.balloons()
                         
-                        # Limpa a memória
                         del st.session_state['df_transbordo']
                     except Exception as e:
                         st.error(f"Erro ao tentar gravar na planilha: {e}")
