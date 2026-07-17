@@ -645,12 +645,13 @@ else:
                                 st.error(f"❌ {r['Cliente']} - Falhou: {r['Motivo']}")
 # --- TELA SECRETA 6: TRANSBORDO DE DADOS (VERSÃO DEFINITIVA LINHA 3) ---
 
+  
     elif modulo == "⚙️ Engenharia (Transbordo)":
         st.title("⚙️ Transbordo de Recebíveis (Leitura Mês a Mês)")
-        st.markdown("Lendo diretamente a partir da **Linha 3** para capturar o Livro Razão exato.")
+        st.markdown("Varrendo o histórico detalhado em busca das **Datas de Pagamento** exatas para o Livro Razão.")
 
         if st.button("🚀 Iniciar Transbordo Histórico com Datas", type="primary"):
-            with st.spinner("Abrindo planilhas e extraindo dados a partir da linha 3. Aguarde..."):
+            with st.spinner("Motor blindado ativado: Caçando cabeçalhos e ignorando colunas vazias..."):
                 planilhas_ids = {
                     "2022": ID_PLANILHA_Recebimento_Wilson_Moreira_2022,
                     "2023": ID_PLANILHA_Recebimento_Wilson_Moreira_2023,
@@ -665,6 +666,9 @@ else:
                     st.stop()
                     
                 banco_de_dados_geral = []
+                log_abas_lidas = []
+
+                import re
 
                 for ano, sheet_id in planilhas_ids.items():
                     try:
@@ -679,58 +683,75 @@ else:
                                 continue
                                 
                             linhas_brutas = aba.get_all_values()
+                            if len(linhas_brutas) < 2: continue
                             
-                            # Se a aba tiver menos de 3 linhas, não tem tabela útil
-                            if len(linhas_brutas) < 3:
-                                continue
-                                
-                            # FIXANDO O CABEÇALHO NA LINHA 3 (Índice 2)
-                            cabecalho = [str(col).strip().upper() for col in linhas_brutas[2]]
-                            dados_tabela = linhas_brutas[3:]
-                            
-                            if not dados_tabela:
-                                continue
-                                
-                            df_aba = pd.DataFrame(dados_tabela, columns=cabecalho)
-                            
-                            # Remove colunas vazias
-                            df_aba = df_aba.loc[:, df_aba.columns.notnull() & (df_aba.columns != '')]
-                            
-                            if 'NOME DO ADQUIRENTE' in df_aba.columns and ('DATA PAGAMENTO' in df_aba.columns or 'VALOR RECEBIDO' in df_aba.columns):
-                                
-                                for index, row in df_aba.iterrows():
-                                    cliente = str(row.get('NOME DO ADQUIRENTE', '')).strip()
-                                    data_pagamento = str(row.get('DATA PAGAMENTO', '')).strip()
-                                    valor_bruto = str(row.get('VALOR RECEBIDO', ''))
+                            # 1. O CAÇADOR DE CABEÇALHOS (Acha a linha exata não importa onde esteja)
+                            linha_cab = -1
+                            cabecalho_limpo = []
+                            for i, row in enumerate(linhas_brutas):
+                                # Limpa espaços extras e padroniza
+                                cols = [re.sub(r'\s+', ' ', str(c)).strip().upper() for c in row]
+                                if "NOME DO ADQUIRENTE" in cols and "VALOR RECEBIDO" in cols:
+                                    linha_cab = i
+                                    cabecalho_limpo = cols
+                                    break
                                     
-                                    # Pula linhas em branco ou sem data preenchida
-                                    if not cliente or not data_pagamento or data_pagamento.lower() == 'nan': 
-                                        continue
-                                        
-                                    v_limpo = valor_bruto.replace('R$', '').replace('.', '').replace(',', '.').strip()
-                                    try:
-                                        v_float = float(v_limpo)
-                                    except:
-                                        v_float = 0.0
-                                        
-                                    if v_float > 0: # REGIME DE CAIXA
-                                        linha_bd = {
-                                            "Ano_Origem": ano,
-                                            "Mes_Aba": aba.title,
-                                            "Cliente": cliente,
-                                            "Contrato": str(row.get('Nº CONTRATO', '')),
-                                            "Unidade": str(row.get('DESCRIÇÃO RESUMIDA DA UNIDADE', '')),
-                                            "Data_Vencimento_Original": str(row.get('DATA VENCIMENTO', '')),
-                                            "Data_Pagamento": data_pagamento,
-                                            "Valor_Recebido": v_float,
-                                            "Conta_Recebimento": str(row.get('CONTA DE RECEBIMENTO', '')),
-                                            "Forma_Pagamento": str(row.get('FORMA DE PAGAMENTO', ''))
-                                        }
-                                        banco_de_dados_geral.append(linha_bd)
-                                        
+                            if linha_cab == -1:
+                                continue # Não é uma aba de pagamentos válida
+                                
+                            log_abas_lidas.append(f"{ano} - {aba.title}")
+                            
+                            # 2. MAPEAMENTO DE ÍNDICES (Imune a colunas vazias duplicadas)
+                            try:
+                                idx_cliente = cabecalho_limpo.index('NOME DO ADQUIRENTE')
+                                idx_data = cabecalho_limpo.index('DATA PAGAMENTO') if 'DATA PAGAMENTO' in cabecalho_limpo else -1
+                                idx_valor = cabecalho_limpo.index('VALOR RECEBIDO')
+                                idx_contrato = cabecalho_limpo.index('Nº CONTRATO') if 'Nº CONTRATO' in cabecalho_limpo else -1
+                                idx_unidade = cabecalho_limpo.index('DESCRIÇÃO RESUMIDA DA UNIDADE') if 'DESCRIÇÃO RESUMIDA DA UNIDADE' in cabecalho_limpo else -1
+                                idx_conta = cabecalho_limpo.index('CONTA DE RECEBIMENTO') if 'CONTA DE RECEBIMENTO' in cabecalho_limpo else -1
+                                idx_forma = cabecalho_limpo.index('FORMA DE PAGAMENTO') if 'FORMA DE PAGAMENTO' in cabecalho_limpo else -1
+                            except ValueError:
+                                continue
+                                
+                            # Se não tem coluna de data de pagamento, ignora
+                            if idx_data == -1: continue
+
+                            dados_tabela = linhas_brutas[linha_cab + 1:]
+                            
+                            # 3. EXTRAÇÃO DIRETA (Sem usar Pandas para evitar crash)
+                            for row in dados_tabela:
+                                # Preenche a linha com vazio se for menor que o cabeçalho
+                                row = row + [''] * (len(cabecalho_limpo) - len(row))
+                                
+                                cliente = str(row[idx_cliente]).strip()
+                                data_pagamento = str(row[idx_data]).strip()
+                                valor_bruto = str(row[idx_valor]).strip()
+                                
+                                # Ignora se não pagou (Célula vazia ou traço)
+                                if not cliente or not data_pagamento or data_pagamento.lower() in ['nan', '-', '']: 
+                                    continue
+                                    
+                                v_limpo = valor_bruto.replace('R$', '').replace('.', '').replace(',', '.').strip()
+                                try: v_float = float(v_limpo)
+                                except: v_float = 0.0
+                                
+                                if v_float > 0:
+                                    banco_de_dados_geral.append({
+                                        "Ano_Origem": ano,
+                                        "Mes_Aba": aba.title,
+                                        "Cliente": cliente,
+                                        "Contrato": str(row[idx_contrato]).strip() if idx_contrato != -1 else "",
+                                        "Unidade": str(row[idx_unidade]).strip() if idx_unidade != -1 else "",
+                                        "Data_Pagamento": data_pagamento,
+                                        "Valor_Recebido": v_float,
+                                        "Conta_Recebimento": str(row[idx_conta]).strip() if idx_conta != -1 else "",
+                                        "Forma_Pagamento": str(row[idx_forma]).strip() if idx_forma != -1 else ""
+                                    })
+                                    
                     except Exception as e:
                         st.error(f"Aviso: Erro ao processar as abas do ano {ano}. Detalhe: {e}")
 
+                # 4. EXIBIÇÃO DO RESULTADO
                 if banco_de_dados_geral:
                     df_final = pd.DataFrame(banco_de_dados_geral)
                     
@@ -741,6 +762,7 @@ else:
 
                     st.success(f"✅ Transbordo Concluído! {len(df_final)} liquidações exatas extraídas do histórico.")
                     st.dataframe(df_final, hide_index=True)
-                    st.info("⬆️ Esta é a base perfeita para cruzamento de impostos e geração de boletos. Cada linha representa uma entrada real no extrato.")
+                    st.info(f"Abas vasculhadas com sucesso e mapeadas: {len(log_abas_lidas)}")
                 else:
-                    st.warning("A varredura foi concluída, mas nenhuma linha válida foi encontrada na linha 3 em diante.")
+                    st.warning("A varredura foi concluída, mas nenhuma linha com 'DATA PAGAMENTO' preenchida com valor foi encontrada.")
+                    st.write("Abas que o sistema conseguiu ler e identificou a tabela:", log_abas_lidas)
