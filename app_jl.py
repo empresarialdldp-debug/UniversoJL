@@ -644,11 +644,12 @@ else:
                             else:
                                 st.error(f"❌ {r['Cliente']} - Falhou: {r['Motivo']}")
 # --- TELA SECRETA 6: TRANSBORDO DE DADOS (VERSÃO DEFINITIVA LINHA 3) ---
-  
+
     elif modulo == "⚙️ Engenharia (Transbordo)":
         st.title("⚙️ Transbordo de Recebíveis (Leitura Mês a Mês)")
-        st.markdown("Varrendo o histórico detalhado em busca das **Datas** e **Valores** exatos para o Livro Razão.")
+        st.markdown("Varrendo o histórico detalhado para criar o **Livro Razão Definitivo**.")
 
+        # BOTÃO 1: LER AS PLANILHAS
         if st.button("🚀 Iniciar Transbordo Histórico com Datas", type="primary"):
             with st.spinner("Motor blindado ativado: Caçando cabeçalhos e ignorando colunas vazias..."):
                 planilhas_ids = {
@@ -666,7 +667,6 @@ else:
                     
                 banco_de_dados_geral = []
                 log_abas_lidas = []
-
                 import re
 
                 for ano, sheet_id in planilhas_ids.items():
@@ -676,31 +676,24 @@ else:
                         
                         for aba in abas:
                             nome_aba = aba.title.lower()
-                            
-                            # Ignora as abas totalizadoras
-                            if "resumo" in nome_aba or "planilha" in nome_aba or "totais" in nome_aba:
-                                continue
+                            if "resumo" in nome_aba or "planilha" in nome_aba or "totais" in nome_aba: continue
                                 
                             linhas_brutas = aba.get_all_values()
                             if len(linhas_brutas) < 2: continue
                             
-                            # 1. O CAÇADOR DE CABEÇALHOS (Agora buscando "DATA" e "VALOR")
                             linha_cab = -1
                             cabecalho_limpo = []
                             for i, row in enumerate(linhas_brutas):
                                 cols = [re.sub(r'\s+', ' ', str(c)).strip().upper() for c in row]
-                                # Correção: Procurando os nomes exatos da sua imagem
                                 if "NOME DO ADQUIRENTE" in cols and "VALOR" in cols and "DATA" in cols:
                                     linha_cab = i
                                     cabecalho_limpo = cols
                                     break
                                     
-                            if linha_cab == -1:
-                                continue 
+                            if linha_cab == -1: continue 
                                 
                             log_abas_lidas.append(f"{ano} - {aba.title}")
                             
-                            # 2. MAPEAMENTO DE ÍNDICES 
                             try:
                                 idx_cliente = cabecalho_limpo.index('NOME DO ADQUIRENTE')
                                 idx_data = cabecalho_limpo.index('DATA')
@@ -712,18 +705,13 @@ else:
 
                             dados_tabela = linhas_brutas[linha_cab + 1:]
                             
-                            # 3. EXTRAÇÃO DIRETA 
                             for row in dados_tabela:
-                                # Preenche a linha com vazio se for menor que o cabeçalho
                                 row = row + [''] * (len(cabecalho_limpo) - len(row))
-                                
                                 cliente = str(row[idx_cliente]).strip()
                                 data_pagamento = str(row[idx_data]).strip()
                                 valor_bruto = str(row[idx_valor]).strip()
                                 
-                                # Ignora se não pagou (Célula vazia ou traço)
-                                if not cliente or not data_pagamento or data_pagamento.lower() in ['nan', '-', '']: 
-                                    continue
+                                if not cliente or not data_pagamento or data_pagamento.lower() in ['nan', '-', '']: continue
                                     
                                 v_limpo = valor_bruto.replace('R$', '').replace('.', '').replace(',', '.').strip()
                                 try: v_float = float(v_limpo)
@@ -731,30 +719,60 @@ else:
                                 
                                 if v_float > 0:
                                     banco_de_dados_geral.append({
-                                        "Ano_Origem": ano,
-                                        "Mes_Aba": aba.title,
-                                        "Cliente": cliente,
+                                        "Ano_Origem": ano, "Mes_Aba": aba.title, "Cliente": cliente,
                                         "Contrato": str(row[idx_contrato]).strip() if idx_contrato != -1 else "",
                                         "Unidade": str(row[idx_unidade]).strip() if idx_unidade != -1 else "",
-                                        "Data_Pagamento": data_pagamento,
-                                        "Valor_Recebido": v_float
+                                        "Data_Pagamento": data_pagamento, "Valor_Recebido": v_float
                                     })
                                     
                     except Exception as e:
-                        st.error(f"Aviso: Erro ao processar as abas do ano {ano}. Detalhe: {e}")
+                        st.error(f"Aviso: Erro ao processar o ano {ano}. Detalhe: {e}")
 
-                # 4. EXIBIÇÃO DO RESULTADO
                 if banco_de_dados_geral:
                     df_final = pd.DataFrame(banco_de_dados_geral)
-                    
                     try:
                         df_final['Data_Pagamento_FMT'] = pd.to_datetime(df_final['Data_Pagamento'], errors='coerce', dayfirst=True)
                         df_final = df_final.sort_values(by='Data_Pagamento_FMT').drop(columns=['Data_Pagamento_FMT'])
                     except: pass
-
-                    st.success(f"✅ Transbordo Concluído! {len(df_final)} liquidações exatas extraídas do histórico.")
-                    st.dataframe(df_final, hide_index=True)
-                    st.info(f"Abas vasculhadas com sucesso e mapeadas: {len(log_abas_lidas)}")
+                    
+                    # Salva na memória do aplicativo para não sumir
+                    st.session_state['df_transbordo'] = df_final
                 else:
-                    st.warning("A varredura foi concluída, mas nenhuma linha com 'DATA' preenchida com valor foi encontrada.")
-                    st.write("Abas que o sistema conseguiu ler e identificou a tabela:", log_abas_lidas)
+                    st.warning("Nenhuma linha encontrada.")
+
+        # SE O DADO JÁ FOI LIDO, MOSTRA A TABELA E O BOTÃO DE SALVAR
+        if 'df_transbordo' in st.session_state:
+            df_mostrar = st.session_state['df_transbordo']
+            st.success(f"✅ Transbordo Concluído! {len(df_mostrar)} liquidações exatas extraídas do histórico.")
+            st.dataframe(df_mostrar, hide_index=True)
+            
+            st.divider()
+            
+            # BOTÃO 2: GRAVAR NO GOOGLE SHEETS
+            if st.button("💾 GRAVAR NA PLANILHA MASTER", type="primary", use_container_width=True):
+                with st.spinner("Criando a aba 'Recebimentos_Master' e gravando 5 anos de histórico..."):
+                    try:
+                        client_gspread = obter_cliente_sheets()
+                        planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
+                        
+                        # Tenta acessar a aba, se não existir, cria uma nova
+                        try:
+                            aba_master = planilha_master.worksheet("Recebimentos_Master")
+                            aba_master.clear() # Limpa se já tiver algo para não duplicar
+                        except:
+                            aba_master = planilha_master.add_worksheet(title="Recebimentos_Master", rows="1000", cols="10")
+                        
+                        # Prepara os dados (converte tudo para texto puro para evitar erros do Google)
+                        df_salvar = df_mostrar.fillna("").astype(str)
+                        dados_para_inserir = [df_salvar.columns.values.tolist()] + df_salvar.values.tolist()
+                        
+                        # Injeta no Sheets
+                        aba_master.append_rows(dados_para_inserir)
+                        
+                        st.success("🎉 Golaço! Os dados foram gravados com sucesso na sua Planilha Master.")
+                        st.balloons()
+                        
+                        # Limpa a memória
+                        del st.session_state['df_transbordo']
+                    except Exception as e:
+                        st.error(f"Erro ao tentar gravar na planilha: {e}")
