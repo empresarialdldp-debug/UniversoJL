@@ -700,8 +700,13 @@ else:
                 # Tabela Visual
                 st.subheader("Situação Individualizada por Investidor")
                 df_visual = df_dash[['Cliente', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
-                df_visual['Progresso'] = (df_visual['Total_Pago'] / df_visual['Valor_Atualizado']) * 100
-                df_visual['Progresso'] = df_visual['Progresso'].fillna(0).clip(upper=100)
+                
+                # --- A TRAVA DE SEGURANÇA CONTRA DIVISÃO POR ZERO ---
+                df_visual['Progresso'] = df_visual.apply(
+                    lambda row: (row['Total_Pago'] / row['Valor_Atualizado'] * 100) if row['Valor_Atualizado'] > 0 else 0.0, 
+                    axis=1
+                )
+                df_visual['Progresso'] = df_visual['Progresso'].clip(upper=100)
                 
                 st.dataframe(
                     df_visual,
