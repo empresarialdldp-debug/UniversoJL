@@ -601,39 +601,73 @@ else:
         planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
 
         # ==========================================
-        # 1. PAINEL DE AJUSTES (A SUA IDEIA)
+        # 1. PAINEL DE AJUSTES (A SUA IDEIA MELHORADA)
         # ==========================================
         st.subheader("🛠️ Lançar Documentação ou Correção")
         with st.expander("Clique para adicionar um valor ao saldo de um cliente"):
             with st.form("form_correcao", clear_on_submit=True):
                 col1, col2, col3 = st.columns(3)
                 
-                # Para evitar digitar errado, pegamos a lista de clientes da planilha 2026
+                # Leitura inteligente da planilha 2026 para preencher a caixinha
                 try:
                     p_2026 = client_gspread.open_by_key(ID_PLANILHA_Recebimento_Wilson_Moreira_2026)
-                    aba_2026 = p_2026.worksheet("Julho") # Pega um mês recente como base
-                    df_lista = pd.DataFrame(aba_2026.get_all_records())
-                    lista_clientes = df_lista['NOME DO ADQUIRENTE'].dropna().unique().tolist()
-                except:
-                    lista_clientes = ["Digite o nome do cliente..."] # Fallback
+                    # Pega a primeira aba útil (ignora resumos)
+                    abas = p_2026.worksheets()
+                    aba_dados = next(aba for aba in abas if "resumo" not in aba.title.lower() and "planilha" not in aba.title.lower())
+                    
+                    linhas_brutas = aba_dados.get_all_values()
+                    
+                    linha_cab = -1
+                    for i, row in enumerate(linhas_brutas):
+                        cols = [str(c).strip().upper() for c in row]
+                        if "NOME DO ADQUIRENTE" in cols:
+                            linha_cab = i
+                            cabecalho_limpo = cols
+                            break
+                    
+                    if linha_cab != -1:
+                        df_lista = pd.DataFrame(linhas_brutas[linha_cab+1:], columns=cabecalho_limpo)
+                        df_lista = df_lista[df_lista['NOME DO ADQUIRENTE'].str.strip() != ""] # Tira linhas vazias
+                        
+                        lista_formatada = []
+                        for _, row in df_lista.iterrows():
+                            nome = str(row.get('NOME DO ADQUIRENTE', '')).strip()
+                            unidade = str(row.get('DESCRIÇÃO RESUMIDA DA UNIDADE', '')).strip()
+                            contrato = str(row.get('Nº CONTRATO', '')).strip()
+                            
+                            # Monta o texto bonitão pra tela
+                            texto_combo = f"{nome}"
+                            if unidade: texto_combo += f" - {unidade}"
+                            if contrato: texto_combo += f" (Contrato: {contrato})"
+                            
+                            if nome and texto_combo not in lista_formatada:
+                                lista_formatada.append(texto_combo)
+                                
+                        lista_clientes = sorted(lista_formatada)
+                    else:
+                        lista_clientes = ["Nenhum cliente encontrado..."]
+                except Exception as e:
+                    lista_clientes = ["Erro ao carregar clientes..."]
 
-                cliente_ajuste = col1.selectbox("Selecione o Cliente:", [c for c in lista_clientes if str(c).strip() != ""])
-                motivo_ajuste = col2.text_input("Motivo (Ex: Documentação, Correção):")
+                cliente_combo = col1.selectbox("Selecione o Cliente:", lista_clientes)
+                motivo_ajuste = col2.text_input("Motivo (Ex: Documentação, INCC):")
                 valor_ajuste = col3.number_input("Valor a adicionar (R$):", min_value=0.0, step=100.0)
                 
                 btn_salvar_ajuste = st.form_submit_button("💾 Salvar Correção no Contrato")
                 
-                if btn_salvar_ajuste and cliente_ajuste and valor_ajuste > 0:
+                if btn_salvar_ajuste and cliente_combo and valor_ajuste > 0:
                     try:
-                        # Tenta abrir a aba de Ajustes, se não existir, ele cria na hora
+                        # Pulo do gato: Extrai apenas o nome (tudo antes do primeiro traço) para o banco de dados
+                        cliente_limpo_bd = cliente_combo.split(" - ")[0].strip() if " - " in cliente_combo else cliente_combo.strip()
+
                         try:
                             aba_ajustes = planilha_master.worksheet("Ajustes_Contratos")
                         except:
                             aba_ajustes = planilha_master.add_worksheet(title="Ajustes_Contratos", rows="100", cols="4")
                             aba_ajustes.append_row(["Data_Registro", "Cliente", "Motivo", "Valor_Ajuste"])
                             
-                        aba_ajustes.append_row([datetime.date.today().strftime('%d/%m/%Y'), cliente_ajuste, motivo_ajuste, valor_ajuste])
-                        st.success(f"Acrescimo de R$ {valor_ajuste} salvo com sucesso para {cliente_ajuste}!")
+                        aba_ajustes.append_row([datetime.date.today().strftime('%d/%m/%Y'), cliente_limpo_bd, motivo_ajuste, valor_ajuste])
+                        st.success(f"Acréscimo de R$ {valor_ajuste} salvo com sucesso para {cliente_limpo_bd}!")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
