@@ -651,13 +651,22 @@ else:
 
                 cliente_combo = col1.selectbox("Selecione o Cliente:", lista_clientes)
                 motivo_ajuste = col2.text_input("Motivo (Ex: Documentação, INCC):")
-                valor_ajuste = col3.number_input("Valor a adicionar (R$):", min_value=0.0, step=100.0)
+                
+                # Trocamos para text_input para aceitar vírgula naturalmente
+                valor_digitado = col3.text_input("Valor a adicionar (R$):", placeholder="Ex: 583,35")
                 
                 btn_salvar_ajuste = st.form_submit_button("💾 Salvar Correção no Contrato")
                 
+                # --- O TRADUTOR DE MOEDA (Padrão BR para Padrão Sistema) ---
+                try:
+                    # Tira pontos de milhares, troca vírgula por ponto e converte para decimal puro
+                    v_limpo = valor_digitado.replace('R$', '').replace('.', '').replace(',', '.').strip()
+                    valor_ajuste = float(v_limpo) if v_limpo else 0.0
+                except:
+                    valor_ajuste = 0.0
+                
                 if btn_salvar_ajuste and cliente_combo and valor_ajuste > 0:
                     try:
-                        # Pulo do gato: Extrai apenas o nome (tudo antes do primeiro traço) para o banco de dados
                         cliente_limpo_bd = cliente_combo.split(" - ")[0].strip() if " - " in cliente_combo else cliente_combo.strip()
 
                         try:
@@ -667,12 +676,11 @@ else:
                             aba_ajustes.append_row(["Data_Registro", "Cliente", "Motivo", "Valor_Ajuste"])
                             
                         aba_ajustes.append_row([datetime.date.today().strftime('%d/%m/%Y'), cliente_limpo_bd, motivo_ajuste, valor_ajuste])
-                        st.success(f"Acréscimo de R$ {valor_ajuste} salvo com sucesso para {cliente_limpo_bd}!")
+                        st.success(f"Acréscimo de R$ {valor_ajuste:.2f} salvo com sucesso para {cliente_limpo_bd}!")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao salvar ajuste: {e}")
-
         st.divider()
 
         # ==========================================
