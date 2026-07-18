@@ -601,51 +601,34 @@ else:
         planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
 
        # ==========================================
-        # 1. PAINEL DE AJUSTES (COM DATA RETROATIVA)
+        # 1. PAINEL DE AJUSTES (COM CAÇADOR DE CABEÇALHO BLINDADO)
         # ==========================================
         st.subheader("🛠️ Lançar Documentação ou Correção")
         with st.expander("Clique para adicionar um valor ao saldo de um cliente"):
             with st.form("form_correcao", clear_on_submit=True):
-                # Dividimos a tela em 4 colunas agora
                 col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
                 
-                # Leitura inteligente da planilha 2026 para preencher a caixinha
+                # Leitura inteligente da planilha 2026 com o Caçador de Cabeçalhos
                 try:
                     p_2026 = client_gspread.open_by_key(ID_PLANILHA_Recebimento_Wilson_Moreira_2026)
                     abas = p_2026.worksheets()
-                    aba_dados = next(aba for aba in abas if "resumo" not in aba.title.lower() and "planilha" not in aba.title.lower())
                     
-                    linhas_brutas = aba_dados.get_all_values()
+                    df_lista = pd.DataFrame()
+                    for aba in abas:
+                        dados_aba = aba.get_all_values()
+                        if len(dados_aba) > 3:
+                            cab = [str(c).strip().upper() for c in dados_aba[2]]
+                            # Acha a tabela verdadeira pela coluna, não pelo nome da aba
+                            if "NOME DO ADQUIRENTE" in cab:
+                                df_lista = pd.DataFrame(dados_aba[3:], columns=cab)
+                                break
                     
-                    linha_cab = -1
-                    for i, row in enumerate(linhas_brutas):
-                        cols = [str(c).strip().upper() for c in row]
-                        if "NOME DO ADQUIRENTE" in cols:
-                            linha_cab = i
-                            cabecalho_limpo = cols
-                            break
-
-                    # --- FILTRO DE LIMPEZA BLINDADO: Remove o rodapé tributário e lixos numéricos ---
-                    termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS', 'VALOR DA VENDA']
-                
-                    # 1. Remove os nomes exatos do rodapé (ignorando maiúsculas/minúsculas)
-                    df_contratos = df_contratos[~df_contratos['Cliente'].str.strip().str.upper().isin(termos_excluir)]
-                
-                    # 2. Remove qualquer linha de somatório que comece com "R$"
-                    df_contratos = df_contratos[~df_contratos['Cliente'].str.strip().str.upper().str.startswith('R$')]
-                
-                    # 3. O Pulo do Gato: Elimina coisas como "0,0065" ou "12%". 
-                    # Um nome real de cliente precisa ter no mínimo 3 letras (A-Z).
-                    df_contratos = df_contratos[df_contratos['Cliente'].astype(str).str.replace(r'[^a-zA-Z]', '', regex=True).str.len() > 2]
-                
-                    # Continua a formatação normal dos valores...
-                    df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.')
-                    df_contratos['VALOR DA UNIDADE'] = pd.to_numeric(df_contratos['VALOR DA UNIDADE'], errors='coerce').fillna(0)
-                    df_contratos = df_contratos[df_contratos['Cliente'] != ""].drop_duplicates(subset=['Cliente'])
-                    
-                    if linha_cab != -1:
-                        df_lista = pd.DataFrame(linhas_brutas[linha_cab+1:], columns=cabecalho_limpo)
-                        df_lista = df_lista[df_lista['NOME DO ADQUIRENTE'].str.strip() != ""] 
+                    if not df_lista.empty:
+                        # --- FILTRO DE LIMPEZA CORRIGIDO (Limpando a df_lista) ---
+                        termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS', 'VALOR DA VENDA']
+                        df_lista = df_lista[~df_lista['NOME DO ADQUIRENTE'].str.strip().str.upper().isin(termos_excluir)]
+                        df_lista = df_lista[~df_lista['NOME DO ADQUIRENTE'].str.strip().str.upper().str.startswith('R$')]
+                        df_lista = df_lista[df_lista['NOME DO ADQUIRENTE'].astype(str).str.replace(r'[^a-zA-Z]', '', regex=True).str.len() > 2]
                         
                         lista_formatada = []
                         for _, row in df_lista.iterrows():
@@ -661,29 +644,30 @@ else:
                                 lista_formatada.append(texto_combo)
                                 
                         lista_clientes = sorted(lista_formatada)
+                        if not lista_clientes:
+                            lista_clientes = ["Nenhum cliente válido encontrado..."]
                     else:
-                        lista_clientes = ["Nenhum cliente encontrado..."]
+                        lista_clientes = ["Tabela não encontrada nas abas..."]
                 except Exception as e:
-                    lista_clientes = ["Erro ao carregar clientes..."]
+                    lista_clientes = [f"Erro na conexão com o Sheets"]
 
                 cliente_combo = col1.selectbox("Selecione o Cliente:", lista_clientes)
                 motivo_ajuste = col2.text_input("Motivo (Ex: Doc, INCC):")
                 valor_digitado = col3.text_input("Valor (R$):", placeholder="Ex: 583,35")
                 
-                # --- NOVO CAMPO DE DATA ---
                 import datetime
                 data_selecionada = col4.date_input("Data do Lançamento:", value=datetime.date.today(), format="DD/MM/YYYY")
                 
                 btn_salvar_ajuste = st.form_submit_button("💾 Salvar Correção no Contrato")
                 
-                # Tradutor de Moeda (Padrão BR para Sistema)
+                # Tradutor de Moeda
                 try:
                     v_limpo = valor_digitado.replace('R$', '').replace('.', '').replace(',', '.').strip()
                     valor_ajuste = float(v_limpo) if v_limpo else 0.0
                 except:
                     valor_ajuste = 0.0
                 
-                if btn_salvar_ajuste and cliente_combo and valor_ajuste > 0:
+                if btn_salvar_ajuste and cliente_combo and valor_ajuste > 0 and "Erro" not in cliente_combo:
                     try:
                         cliente_limpo_bd = cliente_combo.split(" - ")[0].strip() if " - " in cliente_combo else cliente_combo.strip()
 
@@ -693,11 +677,11 @@ else:
                             aba_ajustes = planilha_master.add_worksheet(title="Ajustes_Contratos", rows="100", cols="4")
                             aba_ajustes.append_row(["Data_Registro", "Cliente", "Motivo", "Valor_Ajuste"])
                             
-                        # Converte a data do calendário para o padrão brasileiro
                         data_formatada = data_selecionada.strftime('%d/%m/%Y')
                         
                         aba_ajustes.append_row([data_formatada, cliente_limpo_bd, motivo_ajuste, valor_ajuste])
                         st.success(f"Acréscimo de R$ {valor_ajuste:.2f} salvo com sucesso para {cliente_limpo_bd} na data {data_formatada}!")
+                        import time
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
