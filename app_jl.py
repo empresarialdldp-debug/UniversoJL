@@ -600,18 +600,18 @@ else:
             
         planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
 
-        # ==========================================
-        # 1. PAINEL DE AJUSTES (A SUA IDEIA MELHORADA)
+       # ==========================================
+        # 1. PAINEL DE AJUSTES (COM DATA RETROATIVA)
         # ==========================================
         st.subheader("🛠️ Lançar Documentação ou Correção")
         with st.expander("Clique para adicionar um valor ao saldo de um cliente"):
             with st.form("form_correcao", clear_on_submit=True):
-                col1, col2, col3 = st.columns(3)
+                # Dividimos a tela em 4 colunas agora
+                col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
                 
                 # Leitura inteligente da planilha 2026 para preencher a caixinha
                 try:
                     p_2026 = client_gspread.open_by_key(ID_PLANILHA_Recebimento_Wilson_Moreira_2026)
-                    # Pega a primeira aba útil (ignora resumos)
                     abas = p_2026.worksheets()
                     aba_dados = next(aba for aba in abas if "resumo" not in aba.title.lower() and "planilha" not in aba.title.lower())
                     
@@ -627,7 +627,7 @@ else:
                     
                     if linha_cab != -1:
                         df_lista = pd.DataFrame(linhas_brutas[linha_cab+1:], columns=cabecalho_limpo)
-                        df_lista = df_lista[df_lista['NOME DO ADQUIRENTE'].str.strip() != ""] # Tira linhas vazias
+                        df_lista = df_lista[df_lista['NOME DO ADQUIRENTE'].str.strip() != ""] 
                         
                         lista_formatada = []
                         for _, row in df_lista.iterrows():
@@ -635,7 +635,6 @@ else:
                             unidade = str(row.get('DESCRIÇÃO RESUMIDA DA UNIDADE', '')).strip()
                             contrato = str(row.get('Nº CONTRATO', '')).strip()
                             
-                            # Monta o texto bonitão pra tela
                             texto_combo = f"{nome}"
                             if unidade: texto_combo += f" - {unidade}"
                             if contrato: texto_combo += f" (Contrato: {contrato})"
@@ -650,16 +649,17 @@ else:
                     lista_clientes = ["Erro ao carregar clientes..."]
 
                 cliente_combo = col1.selectbox("Selecione o Cliente:", lista_clientes)
-                motivo_ajuste = col2.text_input("Motivo (Ex: Documentação, INCC):")
+                motivo_ajuste = col2.text_input("Motivo (Ex: Doc, INCC):")
+                valor_digitado = col3.text_input("Valor (R$):", placeholder="Ex: 583,35")
                 
-                # Trocamos para text_input para aceitar vírgula naturalmente
-                valor_digitado = col3.text_input("Valor a adicionar (R$):", placeholder="Ex: 583,35")
+                # --- NOVO CAMPO DE DATA ---
+                import datetime
+                data_selecionada = col4.date_input("Data do Lançamento:", value=datetime.date.today(), format="DD/MM/YYYY")
                 
                 btn_salvar_ajuste = st.form_submit_button("💾 Salvar Correção no Contrato")
                 
-                # --- O TRADUTOR DE MOEDA (Padrão BR para Padrão Sistema) ---
+                # Tradutor de Moeda (Padrão BR para Sistema)
                 try:
-                    # Tira pontos de milhares, troca vírgula por ponto e converte para decimal puro
                     v_limpo = valor_digitado.replace('R$', '').replace('.', '').replace(',', '.').strip()
                     valor_ajuste = float(v_limpo) if v_limpo else 0.0
                 except:
@@ -675,8 +675,11 @@ else:
                             aba_ajustes = planilha_master.add_worksheet(title="Ajustes_Contratos", rows="100", cols="4")
                             aba_ajustes.append_row(["Data_Registro", "Cliente", "Motivo", "Valor_Ajuste"])
                             
-                        aba_ajustes.append_row([datetime.date.today().strftime('%d/%m/%Y'), cliente_limpo_bd, motivo_ajuste, valor_ajuste])
-                        st.success(f"Acréscimo de R$ {valor_ajuste:.2f} salvo com sucesso para {cliente_limpo_bd}!")
+                        # Converte a data do calendário para o padrão brasileiro
+                        data_formatada = data_selecionada.strftime('%d/%m/%Y')
+                        
+                        aba_ajustes.append_row([data_formatada, cliente_limpo_bd, motivo_ajuste, valor_ajuste])
+                        st.success(f"Acréscimo de R$ {valor_ajuste:.2f} salvo com sucesso para {cliente_limpo_bd} na data {data_formatada}!")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
