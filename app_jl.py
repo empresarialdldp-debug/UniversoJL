@@ -624,6 +624,15 @@ else:
                             linha_cab = i
                             cabecalho_limpo = cols
                             break
+
+                    # --- FILTRO DE LIMPEZA: Remove o rodapé tributário ---
+                    termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS']
+                    df_contratos = df_contratos[~df_contratos['Cliente'].str.upper().isin(termos_excluir)]
+                    df_contratos = df_contratos[df_contratos['Cliente'].str.len() > 5] # Remove % e números soltos
+                
+                    df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.')
+                    df_contratos['VALOR DA UNIDADE'] = pd.to_numeric(df_contratos['VALOR DA UNIDADE'], errors='coerce').fillna(0)
+                    df_contratos = df_contratos[df_contratos['Cliente'] != ""].drop_duplicates(subset=['Cliente'])
                     
                     if linha_cab != -1:
                         df_lista = pd.DataFrame(linhas_brutas[linha_cab+1:], columns=cabecalho_limpo)
@@ -689,12 +698,13 @@ else:
         # ==========================================
         # 2. CONSOLIDAÇÃO E MATEMÁTICA DO DASHBOARD
         # ==========================================
-        with st.spinner("Consolidando Livro Razão, Contratos e Correções..."):
+        with st.spinner("Consolidando Livro Razão, Contratos, Correções e Tributos..."):
             try:
                 # A. PAGAMENTOS (Livro Razão)
                 aba_recebimentos = planilha_master.worksheet("Recebimentos_Master")
                 df_pagamentos = pd.DataFrame(aba_recebimentos.get_all_records())
                 df_pagamentos['Valor_Recebido'] = pd.to_numeric(df_pagamentos['Valor_Recebido'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+                
                 df_resumo_pago = df_pagamentos.groupby('Cliente')['Valor_Recebido'].sum().reset_index()
                 df_resumo_pago.rename(columns={'Valor_Recebido': 'Total_Pago'}, inplace=True)
 
@@ -710,11 +720,17 @@ else:
                             break 
                             
                 df_contratos.rename(columns={'NOME DO ADQUIRENTE': 'Cliente'}, inplace=True)
+                
+                # --- FILTRO DE LIMPEZA: Remove o rodapé tributário ---
+                termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS']
+                df_contratos = df_contratos[~df_contratos['Cliente'].str.upper().isin(termos_excluir)]
+                df_contratos = df_contratos[df_contratos['Cliente'].str.len() > 5] # Remove % e números soltos
+                
                 df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.')
                 df_contratos['VALOR DA UNIDADE'] = pd.to_numeric(df_contratos['VALOR DA UNIDADE'], errors='coerce').fillna(0)
                 df_contratos = df_contratos[df_contratos['Cliente'] != ""].drop_duplicates(subset=['Cliente'])
 
-                # C. CORREÇÕES (Ajustes inseridos pelo seu botão)
+                # C. CORREÇÕES
                 try:
                     aba_ajustes = planilha_master.worksheet("Ajustes_Contratos")
                     df_aj = pd.DataFrame(aba_ajustes.get_all_records())
@@ -727,26 +743,55 @@ else:
                 df_dash = pd.merge(df_contratos, df_resumo_ajustes, on='Cliente', how='left').fillna(0)
                 df_dash = pd.merge(df_dash, df_resumo_pago, on='Cliente', how='left').fillna(0)
 
-                # A Matemática Final
                 df_dash['Valor_Atualizado'] = df_dash['VALOR DA UNIDADE'] + df_dash['Valor_Ajuste']
                 df_dash['Saldo_Devedor'] = df_dash['Valor_Atualizado'] - df_dash['Total_Pago']
                 df_dash['Saldo_Devedor'] = df_dash['Saldo_Devedor'].apply(lambda x: x if x > 0 else 0)
 
-                # KPIs 
                 vgv_total = df_dash['Valor_Atualizado'].sum()
                 recebido_total = df_dash['Total_Pago'].sum()
                 devedor_total = df_dash['Saldo_Devedor'].sum()
 
+                # --- KPIs PRINCIPAIS ---
                 c1, c2, c3 = st.columns(3)
-                c1.metric("💰 VGV Atualizado (Com Documentação)", f"R$ {vgv_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                c2.metric("✅ Caixa Realizado (Total Recebido)", f"R$ {recebido_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                c3.metric("⚠️ Saldo Devedor (A Receber)", f"R$ {devedor_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                c1.metric("💰 VGV Atualizado", f"R$ {vgv_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                c2.metric("✅ Caixa Realizado", f"R$ {recebido_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                c3.metric("⚠️ Saldo Devedor", f"R$ {devedor_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                 
-                # Tabela Visual
+                # ==========================================
+                # 3. NOVO: CÁLCULO TRIBUTÁRIO (REGIME DE CAIXA)
+                # ==========================================
+                st.divider()
+                st.subheader("🏛️ Resumo Tributário (Baseado no Caixa Realizado)")
+                
+                pis_total = recebido_total * 0.0065
+                cofins_total = recebido_total * 0.03
+                csll_total = recebido_total * 0.0108
+                ir_normal_total = recebido_total * 0.012
+                
+                # Cálculo do IR Adicional exato (Agrupando por Mês/Ano)
+                df_pagamentos['Data_FMT'] = pd.to_datetime(df_pagamentos['Data_Pagamento'], errors='coerce', dayfirst=True)
+                df_pagamentos['Mes_Ano'] = df_pagamentos['Data_FMT'].dt.to_period('M')
+                receita_mensal = df_pagamentos.groupby('Mes_Ano')['Valor_Recebido'].sum().reset_index()
+                
+                ir_adicional_total = 0
+                for _, row in receita_mensal.iterrows():
+                    rec_mes = row['Valor_Recebido']
+                    base_pres = rec_mes * 0.08
+                    if base_pres > 20000:
+                        ir_adicional_total += (base_pres - 20000) * 0.10
+
+                t1, t2, t3, t4, t5 = st.columns(5)
+                t1.metric("PIS (0,65%)", f"R$ {pis_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                t2.metric("COFINS (3%)", f"R$ {cofins_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                t3.metric("CSLL (1,08%)", f"R$ {csll_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                t4.metric("IR (1,2%)", f"R$ {ir_normal_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                t5.metric("IR Adicional", f"R$ {ir_adicional_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+
+                # --- TABELA DE CLIENTES LIMPA ---
+                st.divider()
                 st.subheader("Situação Individualizada por Investidor")
                 df_visual = df_dash[['Cliente', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
                 
-                # --- A TRAVA DE SEGURANÇA CONTRA DIVISÃO POR ZERO ---
                 df_visual['Progresso'] = df_visual.apply(
                     lambda row: (row['Total_Pago'] / row['Valor_Atualizado'] * 100) if row['Valor_Atualizado'] > 0 else 0.0, 
                     axis=1
@@ -758,7 +803,7 @@ else:
                     column_config={
                         "Cliente": st.column_config.TextColumn("Investidor"),
                         "VALOR DA UNIDADE": st.column_config.NumberColumn("Contrato Original", format="R$ %.2f"),
-                        "Valor_Ajuste": st.column_config.NumberColumn("+ Correções/Doc", format="R$ %.2f"),
+                        "Valor_Ajuste": st.column_config.NumberColumn("+ Correções", format="R$ %.2f"),
                         "Valor_Atualizado": st.column_config.NumberColumn("Total Atualizado", format="R$ %.2f"),
                         "Total_Pago": st.column_config.NumberColumn("Pago", format="R$ %.2f"),
                         "Saldo_Devedor": st.column_config.NumberColumn("Saldo Devedor", format="R$ %.2f"),
