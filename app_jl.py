@@ -775,60 +775,124 @@ else:
                 c2.metric("✅ Caixa Realizado", f"R$ {recebido_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                 c3.metric("⚠️ Saldo Devedor", f"R$ {devedor_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                 
-                # ==========================================
-                # 3. NOVO: CÁLCULO TRIBUTÁRIO (REGIME DE CAIXA)
-                # ==========================================
                 st.divider()
-                st.subheader("🏛️ Resumo Tributário (Baseado no Caixa Realizado)")
-                
-                pis_total = recebido_total * 0.0065
-                cofins_total = recebido_total * 0.03
-                csll_total = recebido_total * 0.0108
-                ir_normal_total = recebido_total * 0.012
-                
-                # Cálculo do IR Adicional exato (Agrupando por Mês/Ano)
-                df_pagamentos['Data_FMT'] = pd.to_datetime(df_pagamentos['Data_Pagamento'], errors='coerce', dayfirst=True)
-                df_pagamentos['Mes_Ano'] = df_pagamentos['Data_FMT'].dt.to_period('M')
-                receita_mensal = df_pagamentos.groupby('Mes_Ano')['Valor_Recebido'].sum().reset_index()
-                
-                ir_adicional_total = 0
-                for _, row in receita_mensal.iterrows():
-                    rec_mes = row['Valor_Recebido']
-                    base_pres = rec_mes * 0.08
-                    if base_pres > 20000:
-                        ir_adicional_total += (base_pres - 20000) * 0.10
 
-                t1, t2, t3, t4, t5 = st.columns(5)
-                t1.metric("PIS (0,65%)", f"R$ {pis_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                t2.metric("COFINS (3%)", f"R$ {cofins_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                t3.metric("CSLL (1,08%)", f"R$ {csll_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                t4.metric("IR (1,2%)", f"R$ {ir_normal_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                t5.metric("IR Adicional", f"R$ {ir_adicional_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                # ==========================================
+                # NOVO: ORGANIZAÇÃO EM ABAS
+                # ==========================================
+                aba_tabela, aba_graficos = st.tabs(["🏢 Detalhamento (Investidores e Resumo Tributário)", "📈 Análise Gráfica (Mensal e Anual)"])
+                
+                with aba_tabela:
+                    # ==========================================
+                    # 3. CÁLCULO TRIBUTÁRIO GERAL (TELA 1)
+                    # ==========================================
+                    st.subheader("🏛️ Resumo Tributário Acumulado (Baseado no Caixa Realizado)")
+                    
+                    pis_total = recebido_total * 0.0065
+                    cofins_total = recebido_total * 0.03
+                    csll_total = recebido_total * 0.0108
+                    ir_normal_total = recebido_total * 0.012
+                    
+                    # Cálculo do IR Adicional exato (Agrupando por Mês/Ano)
+                    df_pagamentos['Data_FMT'] = pd.to_datetime(df_pagamentos['Data_Pagamento'], errors='coerce', dayfirst=True)
+                    df_pagamentos['Mes_Ano'] = df_pagamentos['Data_FMT'].dt.to_period('M')
+                    receita_mensal = df_pagamentos.groupby('Mes_Ano')['Valor_Recebido'].sum().reset_index()
+                    
+                    ir_adicional_total = 0
+                    for _, row in receita_mensal.iterrows():
+                        rec_mes = row['Valor_Recebido']
+                        base_pres = rec_mes * 0.08
+                        if base_pres > 20000:
+                            ir_adicional_total += (base_pres - 20000) * 0.10
 
-                # --- TABELA DE CLIENTES LIMPA ---
-                st.divider()
-                st.subheader("Situação Individualizada por Investidor")
-                df_visual = df_dash[['Cliente', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
+                    t1, t2, t3, t4, t5 = st.columns(5)
+                    t1.metric("PIS (0,65%)", f"R$ {pis_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                    t2.metric("COFINS (3%)", f"R$ {cofins_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                    t3.metric("CSLL (1,08%)", f"R$ {csll_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                    t4.metric("IR (1,2%)", f"R$ {ir_normal_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                    t5.metric("IR Adicional", f"R$ {ir_adicional_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+
+                    # --- TABELA DE CLIENTES LIMPA ---
+                    st.divider()
+                    st.subheader("Situação Individualizada por Investidor")
+                    df_visual = df_dash[['Cliente', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
+                    
+                    df_visual['Progresso'] = df_visual.apply(
+                        lambda row: (row['Total_Pago'] / row['Valor_Atualizado'] * 100) if row['Valor_Atualizado'] > 0 else 0.0, 
+                        axis=1
+                    )
+                    df_visual['Progresso'] = df_visual['Progresso'].clip(upper=100)
+                    
+                    st.dataframe(
+                        df_visual,
+                        column_config={
+                            "Cliente": st.column_config.TextColumn("Investidor"),
+                            "VALOR DA UNIDADE": st.column_config.NumberColumn("Contrato Original", format="R$ %.2f"),
+                            "Valor_Ajuste": st.column_config.NumberColumn("+ Correções", format="R$ %.2f"),
+                            "Valor_Atualizado": st.column_config.NumberColumn("Total Atualizado", format="R$ %.2f"),
+                            "Total_Pago": st.column_config.NumberColumn("Pago", format="R$ %.2f"),
+                            "Saldo_Devedor": st.column_config.NumberColumn("Saldo Devedor", format="R$ %.2f"),
+                            "Progresso": st.column_config.ProgressColumn("Quitação", format="%.1f %%", min_value=0, max_value=100)
+                        },
+                        hide_index=True, use_container_width=True
+                    )
                 
-                df_visual['Progresso'] = df_visual.apply(
-                    lambda row: (row['Total_Pago'] / row['Valor_Atualizado'] * 100) if row['Valor_Atualizado'] > 0 else 0.0, 
-                    axis=1
-                )
-                df_visual['Progresso'] = df_visual['Progresso'].clip(upper=100)
-                
-                st.dataframe(
-                    df_visual,
-                    column_config={
-                        "Cliente": st.column_config.TextColumn("Investidor"),
-                        "VALOR DA UNIDADE": st.column_config.NumberColumn("Contrato Original", format="R$ %.2f"),
-                        "Valor_Ajuste": st.column_config.NumberColumn("+ Correções", format="R$ %.2f"),
-                        "Valor_Atualizado": st.column_config.NumberColumn("Total Atualizado", format="R$ %.2f"),
-                        "Total_Pago": st.column_config.NumberColumn("Pago", format="R$ %.2f"),
-                        "Saldo_Devedor": st.column_config.NumberColumn("Saldo Devedor", format="R$ %.2f"),
-                        "Progresso": st.column_config.ProgressColumn("Quitação", format="%.1f %%", min_value=0, max_value=100)
-                    },
-                    hide_index=True, use_container_width=True
-                )
+                with aba_graficos:
+                    # ==========================================
+                    # 4. GRÁFICOS ANALÍTICOS (TELA 2)
+                    # ==========================================
+                    st.subheader("Evolução do Caixa e Carga Tributária")
+
+                    if not df_pagamentos.empty:
+                        df_grafico = df_pagamentos.dropna(subset=['Data_FMT']).copy()
+                        
+                        # --- PREPARAÇÃO DOS DADOS MENSAIS ---
+                        df_grafico['Mes_Periodo'] = df_grafico['Data_FMT'].dt.to_period('M')
+                        df_mensal_graf = df_grafico.groupby('Mes_Periodo')['Valor_Recebido'].sum().reset_index()
+
+                        # Recalcula impostos mensais linha a linha
+                        df_mensal_graf['Impostos_Comuns'] = df_mensal_graf['Valor_Recebido'] * (0.0065 + 0.03 + 0.0108 + 0.012)
+                        df_mensal_graf['Base_IR'] = df_mensal_graf['Valor_Recebido'] * 0.08
+                        df_mensal_graf['IR_Adicional'] = df_mensal_graf['Base_IR'].apply(lambda x: (x - 20000) * 0.10 if x > 20000 else 0)
+
+                        df_mensal_graf['Total_Tributos'] = df_mensal_graf['Impostos_Comuns'] + df_mensal_graf['IR_Adicional']
+                        df_mensal_graf['Caixa_Livre_Liquido'] = df_mensal_graf['Valor_Recebido'] - df_mensal_graf['Total_Tributos']
+                        
+                        # Formata o eixo para aparecer como "01/2026"
+                        df_mensal_graf['Mês/Ano'] = df_mensal_graf['Mes_Periodo'].dt.strftime('%m/%Y')
+
+                        # GRÁFICO MENSAL EMPILHADO
+                        st.markdown("### 📅 Desempenho Mensal")
+                        st.caption("Visão do dinheiro que efetivamente ficou na conta vs Impostos gerados na competência.")
+                        df_chart_m = df_mensal_graf[['Mês/Ano', 'Caixa_Livre_Liquido', 'Total_Tributos']].set_index('Mês/Ano')
+                        # Azul para Caixa, Vermelho para Tributos
+                        st.bar_chart(df_chart_m, color=["#1f77b4", "#d62728"], height=350) 
+                        
+                        st.divider()
+
+                        # --- PREPARAÇÃO DOS DADOS ANUAIS ---
+                        df_grafico['Ano'] = df_grafico['Data_FMT'].dt.year.astype(str)
+                        df_anual = df_grafico.groupby('Ano')['Valor_Recebido'].sum().reset_index()
+
+                        df_anual['Impostos_Comuns'] = df_anual['Valor_Recebido'] * (0.0065 + 0.03 + 0.0108 + 0.012)
+                        
+                        # O IR Adicional Anual DEVE ser a soma dos meses (para não falhar na isenção)
+                        soma_ir_adicional_anual = df_mensal_graf.groupby(df_mensal_graf['Mes_Periodo'].dt.year)['IR_Adicional'].sum().reset_index()
+                        soma_ir_adicional_anual.columns = ['Ano', 'IR_Adicional']
+                        soma_ir_adicional_anual['Ano'] = soma_ir_adicional_anual['Ano'].astype(str)
+
+                        df_anual = pd.merge(df_anual, soma_ir_adicional_anual, on='Ano', how='left').fillna(0)
+                        df_anual['Total_Tributos'] = df_anual['Impostos_Comuns'] + df_anual['IR_Adicional']
+                        df_anual['Caixa_Livre_Liquido'] = df_anual['Valor_Recebido'] - df_anual['Total_Tributos']
+
+                        # GRÁFICO ANUAL EMPILHADO
+                        st.markdown("### 📆 Consolidado Anual")
+                        df_chart_a = df_anual[['Ano', 'Caixa_Livre_Liquido', 'Total_Tributos']].set_index('Ano')
+                        # Verde para Caixa Anual, Vermelho para Tributos
+                        st.bar_chart(df_chart_a, color=["#2ca02c", "#d62728"], height=350)
+                    else:
+                        st.info("Ainda não há pagamentos registrados para gerar os gráficos.")
+            
             except Exception as e:
                 st.error(f"Erro ao processar o Dashboard: {e}")
         
