@@ -600,8 +600,8 @@ else:
             
         planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
 
-       # ==========================================
-        # 1. PAINEL DE AJUSTES (COM CAÇADOR DE CABEÇALHO BLINDADO)
+      # ==========================================
+        # 1. PAINEL DE AJUSTES (COM CAÇADOR DE CABEÇALHO E MOEDA BLINDADOS)
         # ==========================================
         st.subheader("🛠️ Lançar Documentação ou Correção")
         with st.expander("Clique para adicionar um valor ao saldo de um cliente"):
@@ -624,7 +624,7 @@ else:
                                 break
                     
                     if not df_lista.empty:
-                        # --- FILTRO DE LIMPEZA CORRIGIDO (Limpando a df_lista) ---
+                        # --- FILTRO DE LIMPEZA CORRIGIDO ---
                         termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS', 'VALOR DA VENDA']
                         df_lista = df_lista[~df_lista['NOME DO ADQUIRENTE'].str.strip().str.upper().isin(termos_excluir)]
                         df_lista = df_lista[~df_lista['NOME DO ADQUIRENTE'].str.strip().str.upper().str.startswith('R$')]
@@ -653,17 +653,31 @@ else:
 
                 cliente_combo = col1.selectbox("Selecione o Cliente:", lista_clientes)
                 motivo_ajuste = col2.text_input("Motivo (Ex: Doc, INCC):")
-                valor_digitado = col3.text_input("Valor (R$):", placeholder="Ex: 583,35")
+                valor_digitado = col3.text_input("Valor (R$):", placeholder="Ex: 1750,10")
                 
                 import datetime
                 data_selecionada = col4.date_input("Data do Lançamento:", value=datetime.date.today(), format="DD/MM/YYYY")
                 
                 btn_salvar_ajuste = st.form_submit_button("💾 Salvar Correção no Contrato")
                 
-                # Tradutor de Moeda
+                # --- TRADUTOR DE MOEDA CORRIGIDO E BLINDADO ---
                 try:
-                    v_limpo = valor_digitado.replace('R$', '').replace('.', '').replace(',', '.').strip()
-                    valor_ajuste = float(v_limpo) if v_limpo else 0.0
+                    v_str = valor_digitado.replace('R$', '').replace(' ', '').strip()
+                    
+                    # 1. Se tem ponto E vírgula (ex: 1.750,10 ou 1,750.10)
+                    if ',' in v_str and '.' in v_str:
+                        if v_str.rfind(',') > v_str.rfind('.'):
+                            v_str = v_str.replace('.', '').replace(',', '.') # Padrão BR (milhar em ponto, decimal em vírgula)
+                        else:
+                            v_str = v_str.replace(',', '') # Padrão Americano (milhar em vírgula, decimal em ponto)
+                            
+                    # 2. Se tem só vírgula (ex: 1750,10)
+                    elif ',' in v_str:
+                        v_str = v_str.replace(',', '.')
+                        
+                    # 3. Se tem só ponto (ex: 1750.10), mantemos como está para o float interpretar
+                    
+                    valor_ajuste = float(v_str) if v_str else 0.0
                 except:
                     valor_ajuste = 0.0
                 
