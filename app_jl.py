@@ -625,11 +625,20 @@ else:
                             cabecalho_limpo = cols
                             break
 
-                    # --- FILTRO DE LIMPEZA: Remove o rodapé tributário ---
-                    termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS']
-                    df_contratos = df_contratos[~df_contratos['Cliente'].str.upper().isin(termos_excluir)]
-                    df_contratos = df_contratos[df_contratos['Cliente'].str.len() > 5] # Remove % e números soltos
+                    # --- FILTRO DE LIMPEZA BLINDADO: Remove o rodapé tributário e lixos numéricos ---
+                    termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS', 'VALOR DA VENDA']
                 
+                    # 1. Remove os nomes exatos do rodapé (ignorando maiúsculas/minúsculas)
+                    df_contratos = df_contratos[~df_contratos['Cliente'].str.strip().str.upper().isin(termos_excluir)]
+                
+                    # 2. Remove qualquer linha de somatório que comece com "R$"
+                    df_contratos = df_contratos[~df_contratos['Cliente'].str.strip().str.upper().str.startswith('R$')]
+                
+                    # 3. O Pulo do Gato: Elimina coisas como "0,0065" ou "12%". 
+                    # Um nome real de cliente precisa ter no mínimo 3 letras (A-Z).
+                    df_contratos = df_contratos[df_contratos['Cliente'].astype(str).str.replace(r'[^a-zA-Z]', '', regex=True).str.len() > 2]
+                
+                    # Continua a formatação normal dos valores...
                     df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.')
                     df_contratos['VALOR DA UNIDADE'] = pd.to_numeric(df_contratos['VALOR DA UNIDADE'], errors='coerce').fillna(0)
                     df_contratos = df_contratos[df_contratos['Cliente'] != ""].drop_duplicates(subset=['Cliente'])
@@ -721,11 +730,20 @@ else:
                             
                 df_contratos.rename(columns={'NOME DO ADQUIRENTE': 'Cliente'}, inplace=True)
                 
-                # --- FILTRO DE LIMPEZA: Remove o rodapé tributário ---
-                termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS']
-                df_contratos = df_contratos[~df_contratos['Cliente'].str.upper().isin(termos_excluir)]
-                df_contratos = df_contratos[df_contratos['Cliente'].str.len() > 5] # Remove % e números soltos
+                # --- FILTRO DE LIMPEZA BLINDADO: Remove o rodapé tributário e lixos numéricos ---
+                termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS', 'VALOR DA VENDA']
                 
+                # 1. Remove os nomes exatos do rodapé (ignorando maiúsculas/minúsculas)
+                df_contratos = df_contratos[~df_contratos['Cliente'].str.strip().str.upper().isin(termos_excluir)]
+                
+                # 2. Remove qualquer linha de somatório que comece com "R$"
+                df_contratos = df_contratos[~df_contratos['Cliente'].str.strip().str.upper().str.startswith('R$')]
+                
+                # 3. O Pulo do Gato: Elimina coisas como "0,0065" ou "12%". 
+                # Um nome real de cliente precisa ter no mínimo 3 letras (A-Z).
+                df_contratos = df_contratos[df_contratos['Cliente'].astype(str).str.replace(r'[^a-zA-Z]', '', regex=True).str.len() > 2]
+                
+                # Continua a formatação normal dos valores...
                 df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.')
                 df_contratos['VALOR DA UNIDADE'] = pd.to_numeric(df_contratos['VALOR DA UNIDADE'], errors='coerce').fillna(0)
                 df_contratos = df_contratos[df_contratos['Cliente'] != ""].drop_duplicates(subset=['Cliente'])
