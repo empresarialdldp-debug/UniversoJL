@@ -784,7 +784,7 @@ else:
                     t4.metric("IR (1,2%)", f"R$ {ir_normal_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                     t5.metric("IR Adicional", f"R$ {ir_adicional_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
 
-                   st.divider()
+                    st.divider()
                     st.subheader("Situação Individualizada por Contrato")
                     
                     # Agora a tabela exibe a Chave Única para você ver os apartamentos separados
