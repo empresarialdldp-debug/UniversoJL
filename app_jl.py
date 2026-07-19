@@ -868,29 +868,33 @@ else:
                         col_ext1, col_ext2 = st.columns(2)
                         
                         with col_ext1:
-                            st.markdown("#### 📥 Pagamentos Identificados (Livro Razão)")
+                            st.markdown("#### 📥 Pagamentos Identificados")
                             df_pag_cli = df_pagamentos[df_pagamentos['Chave'] == cliente_auditoria].copy()
+                            
                             if not df_pag_cli.empty:
+                                soma_pags = df_pag_cli['Valor_Recebido'].sum()
+                                # O Total agora fica no topo, protegido do zoom da tabela
+                                st.success(f"Soma dos Pagamentos: R$ {soma_pags:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                                
                                 try:
                                     df_disp_pag = df_pag_cli[['Data_Pagamento', 'Valor_Recebido']].copy()
                                 except:
                                     df_disp_pag = df_pag_cli
                                 st.dataframe(df_disp_pag, hide_index=True, use_container_width=True)
-                                soma_pags = df_pag_cli['Valor_Recebido'].sum()
-                                st.success(f"Soma dos Pagamentos: R$ {soma_pags:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                             else:
                                 st.warning("Nenhum pagamento localizado para esta chave exata.")
                         
                         with col_ext2:
-                            st.markdown("#### 🛠️ Ajustes/Documentação (Adições)")
+                            st.markdown("#### 🛠️ Ajustes/Documentação")
                             try:
-                                # df_aj tem a coluna 'Cliente' que na verdade armazena a nossa Chave Única
                                 df_aj_cli = df_aj[df_aj['Cliente'] == cliente_auditoria].copy()
                                 if not df_aj_cli.empty:
+                                    soma_ajs = df_aj_cli['Valor_Ajuste'].sum()
+                                    # O Total agora fica no topo
+                                    st.info(f"Soma dos Ajustes: R$ {soma_ajs:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                                    
                                     df_disp_aj = df_aj_cli[['Data_Registro', 'Motivo', 'Valor_Ajuste']].copy()
                                     st.dataframe(df_disp_aj, hide_index=True, use_container_width=True)
-                                    soma_ajs = df_aj_cli['Valor_Ajuste'].sum()
-                                    st.info(f"Soma dos Ajustes: R$ {soma_ajs:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                                 else:
                                     st.info("Nenhum ajuste/documentação adicionado.")
                             except:
