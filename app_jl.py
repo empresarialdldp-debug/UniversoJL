@@ -756,9 +756,13 @@ else:
                 st.divider()
 
                 # ==========================================
-                # ABAS DE ANÁLISE
+                # ABAS DE ANÁLISE E AUDITORIA
                 # ==========================================
-                aba_tabela, aba_graficos = st.tabs(["🏢 Detalhamento (Investidores e Tributos)", "📈 Análise Gráfica (Mensal e Anual)"])
+                aba_tabela, aba_graficos, aba_extrato = st.tabs([
+                    "🏢 Detalhamento (Investidores e Tributos)", 
+                    "📈 Análise Gráfica (Mensal e Anual)",
+                    "🔍 Extrato do Investidor (Auditoria)"
+                ])
                 
                 with aba_tabela:
                     st.subheader("🏛️ Resumo Tributário Acumulado (Baseado no Caixa Realizado)")
@@ -786,8 +790,6 @@ else:
 
                     st.divider()
                     st.subheader("Situação Individualizada por Contrato")
-                    
-                    # Agora a tabela exibe a Chave Única para você ver os apartamentos separados
                     df_visual = df_dash[['Chave', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
                     
                     df_visual['Progresso'] = df_visual.apply(
@@ -796,16 +798,8 @@ else:
                     )
                     df_visual['Progresso'] = df_visual['Progresso'].clip(upper=100)
                     
-                    # ==========================================
-                    # O PULO DO GATO: ZOOM NA TABELA
-                    # ==========================================
-                    st.markdown("""
-                        <style>
-                        [data-testid="stDataFrame"] {
-                            zoom: 1.25; /* 1.25 significa 25% maior. Teste 1.3 ou 1.4 se quiser ainda maior! */
-                        }
-                        </style>
-                    """, unsafe_allow_html=True)
+                    # Zoom para melhorar a leitura
+                    st.markdown("""<style>[data-testid="stDataFrame"] {zoom: 1.15;}</style>""", unsafe_allow_html=True)
                     
                     st.dataframe(
                         df_visual,
@@ -859,7 +853,48 @@ else:
                         st.bar_chart(df_chart_a, color=["#2ca02c", "#d62728"], height=350)
                     else:
                         st.info("Ainda não há pagamentos registrados para gerar os gráficos.")
-            
+
+                # ==========================================
+                # NOVA ABA: EXTRATO DO INVESTIDOR (AUDITORIA)
+                # ==========================================
+                with aba_extrato:
+                    st.subheader("🔎 Auditoria: Extrato de Pagamentos e Ajustes")
+                    st.markdown("Selecione um contrato para verificar todas as parcelas e taxas que o sistema encontrou para ele.")
+                    
+                    lista_chaves = sorted([str(c) for c in df_dash['Chave'].unique() if str(c).strip() != ""])
+                    cliente_auditoria = st.selectbox("Selecione o Contrato para auditar:", lista_chaves)
+                    
+                    if cliente_auditoria:
+                        col_ext1, col_ext2 = st.columns(2)
+                        
+                        with col_ext1:
+                            st.markdown("#### 📥 Pagamentos Identificados (Livro Razão)")
+                            df_pag_cli = df_pagamentos[df_pagamentos['Chave'] == cliente_auditoria].copy()
+                            if not df_pag_cli.empty:
+                                try:
+                                    df_disp_pag = df_pag_cli[['Data_Pagamento', 'Valor_Recebido']].copy()
+                                except:
+                                    df_disp_pag = df_pag_cli
+                                st.dataframe(df_disp_pag, hide_index=True, use_container_width=True)
+                                soma_pags = df_pag_cli['Valor_Recebido'].sum()
+                                st.success(f"Soma dos Pagamentos: R$ {soma_pags:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                            else:
+                                st.warning("Nenhum pagamento localizado para esta chave exata.")
+                        
+                        with col_ext2:
+                            st.markdown("#### 🛠️ Ajustes/Documentação (Adições)")
+                            try:
+                                # df_aj tem a coluna 'Cliente' que na verdade armazena a nossa Chave Única
+                                df_aj_cli = df_aj[df_aj['Cliente'] == cliente_auditoria].copy()
+                                if not df_aj_cli.empty:
+                                    df_disp_aj = df_aj_cli[['Data_Registro', 'Motivo', 'Valor_Ajuste']].copy()
+                                    st.dataframe(df_disp_aj, hide_index=True, use_container_width=True)
+                                    soma_ajs = df_aj_cli['Valor_Ajuste'].sum()
+                                    st.info(f"Soma dos Ajustes: R$ {soma_ajs:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                                else:
+                                    st.info("Nenhum ajuste/documentação adicionado.")
+                            except:
+                                st.info("Sem base de ajustes.")
             except Exception as e:
                 st.error(f"Erro ao processar o Dashboard: {e}")
     # --- TELA 5: FATURAMENTO (BOLETOS) ---
