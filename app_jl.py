@@ -854,7 +854,7 @@ else:
                     else:
                         st.info("Ainda não há pagamentos registrados para gerar os gráficos.")
 
-               # ==========================================
+              # ==========================================
                 # NOVA ABA: EXTRATO DO INVESTIDOR (AUDITORIA)
                 # ==========================================
                 with aba_extrato:
@@ -921,6 +921,9 @@ else:
                                     st.info("Nenhum ajuste/documentação adicionado.")
                             except:
                                 st.info("Sem base de ajustes.")
+            except Exception as e:
+                st.error(f"Erro ao processar o Dashboard: {e}")
+                                
     # --- TELA 5: FATURAMENTO (BOLETOS) ---
     elif modulo == "💸 Faturamento e Boletos":
         st.title("💸 Gestão de Recebíveis e Emissão")
