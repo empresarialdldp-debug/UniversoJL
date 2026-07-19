@@ -13,15 +13,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests
 
-from inter_sdk_python.billing.models.BillingIssueRequest import BillingIssueRequest
-from inter_sdk_python.billing.models.Person import Person 
-try:
-    from inter_sdk_python.commons.models.PersonType import PersonType
-except:
-    from enum import Enum
-    class PersonType(Enum):
-        FISICA = "FISICA"
-        JURIDICA = "JURIDICA"
+
 
 # ==========================================
 # 1. CONFIGURAÇÕES GLOBAIS - J&L INCORPORADORA
@@ -47,6 +39,19 @@ if not os.path.exists('inter_sdk_python') and os.path.exists('inter_sdk_python.z
     with zipfile.ZipFile('inter_sdk_python.zip', 'r') as zip_ref:
         zip_ref.extractall('.')
     st.toast("📦 SDK do Banco Inter extraído com sucesso na nuvem!", icon="⚙️")
+
+# ==========================================
+# IMPORTAR O SDK EXTRAÍDO
+# ==========================================
+from inter_sdk_python.billing.models.BillingIssueRequest import BillingIssueRequest
+from inter_sdk_python.billing.models.Person import Person 
+try:
+    from inter_sdk_python.commons.models.PersonType import PersonType
+except ImportError:
+    from enum import Enum
+    class PersonType(Enum):
+        FISICA = "FISICA"
+        JURIDICA = "JURIDICA"
 
 # ==========================================
 # 2. CONEXÕES E MOTORES BLINDADOS
