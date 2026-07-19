@@ -784,8 +784,10 @@ else:
                     t4.metric("IR (1,2%)", f"R$ {ir_normal_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                     t5.metric("IR Adicional", f"R$ {ir_adicional_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
 
-                    st.divider()
+                   st.divider()
                     st.subheader("Situação Individualizada por Contrato")
+                    
+                    # Agora a tabela exibe a Chave Única para você ver os apartamentos separados
                     df_visual = df_dash[['Chave', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
                     
                     df_visual['Progresso'] = df_visual.apply(
@@ -793,6 +795,17 @@ else:
                         axis=1
                     )
                     df_visual['Progresso'] = df_visual['Progresso'].clip(upper=100)
+                    
+                    # ==========================================
+                    # O PULO DO GATO: ZOOM NA TABELA
+                    # ==========================================
+                    st.markdown("""
+                        <style>
+                        [data-testid="stDataFrame"] {
+                            zoom: 1.25; /* 1.25 significa 25% maior. Teste 1.3 ou 1.4 se quiser ainda maior! */
+                        }
+                        </style>
+                    """, unsafe_allow_html=True)
                     
                     st.dataframe(
                         df_visual,
