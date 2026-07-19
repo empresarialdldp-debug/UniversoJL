@@ -7,4 +7,3 @@ plotly
 requests
 google-genai
 cryptography
-git+https://github.com/bancointer/inter-sdk-python.git
