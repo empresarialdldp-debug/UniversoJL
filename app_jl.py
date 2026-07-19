@@ -854,7 +854,7 @@ else:
                     else:
                         st.info("Ainda não há pagamentos registrados para gerar os gráficos.")
 
-                # ==========================================
+               # ==========================================
                 # NOVA ABA: EXTRATO DO INVESTIDOR (AUDITORIA)
                 # ==========================================
                 with aba_extrato:
@@ -873,14 +873,24 @@ else:
                             
                             if not df_pag_cli.empty:
                                 soma_pags = df_pag_cli['Valor_Recebido'].sum()
-                                # O Total agora fica no topo, protegido do zoom da tabela
                                 st.success(f"Soma dos Pagamentos: R$ {soma_pags:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                                 
                                 try:
                                     df_disp_pag = df_pag_cli[['Data_Pagamento', 'Valor_Recebido']].copy()
+                                    # FORÇANDO O PADRÃO BRASILEIRO NA DATA
+                                    df_disp_pag['Data_Pagamento'] = pd.to_datetime(df_disp_pag['Data_Pagamento'], errors='coerce').dt.strftime('%d/%m/%Y')
                                 except:
                                     df_disp_pag = df_pag_cli
-                                st.dataframe(df_disp_pag, hide_index=True, use_container_width=True)
+                                
+                                # Renderizando com formatação de moeda e texto limpo
+                                st.dataframe(
+                                    df_disp_pag, 
+                                    column_config={
+                                        "Data_Pagamento": st.column_config.TextColumn("Data do Pagamento"),
+                                        "Valor_Recebido": st.column_config.NumberColumn("Valor Pago", format="R$ %.2f")
+                                    },
+                                    hide_index=True, use_container_width=True
+                                )
                             else:
                                 st.warning("Nenhum pagamento localizado para esta chave exata.")
                         
@@ -890,17 +900,27 @@ else:
                                 df_aj_cli = df_aj[df_aj['Cliente'] == cliente_auditoria].copy()
                                 if not df_aj_cli.empty:
                                     soma_ajs = df_aj_cli['Valor_Ajuste'].sum()
-                                    # O Total agora fica no topo
                                     st.info(f"Soma dos Ajustes: R$ {soma_ajs:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                                     
                                     df_disp_aj = df_aj_cli[['Data_Registro', 'Motivo', 'Valor_Ajuste']].copy()
-                                    st.dataframe(df_disp_aj, hide_index=True, use_container_width=True)
+                                    
+                                    # FORÇANDO O PADRÃO BRASILEIRO NA DATA AQUI TAMBÉM
+                                    df_disp_aj['Data_Registro'] = pd.to_datetime(df_disp_aj['Data_Registro'], errors='coerce').dt.strftime('%d/%m/%Y')
+                                    
+                                    # Renderizando com formatação de moeda e texto limpo
+                                    st.dataframe(
+                                        df_disp_aj, 
+                                        column_config={
+                                            "Data_Registro": st.column_config.TextColumn("Data do Registro"),
+                                            "Motivo": st.column_config.TextColumn("Motivo"),
+                                            "Valor_Ajuste": st.column_config.NumberColumn("Valor Adicional", format="R$ %.2f")
+                                        },
+                                        hide_index=True, use_container_width=True
+                                    )
                                 else:
                                     st.info("Nenhum ajuste/documentação adicionado.")
                             except:
                                 st.info("Sem base de ajustes.")
-            except Exception as e:
-                st.error(f"Erro ao processar o Dashboard: {e}")
     # --- TELA 5: FATURAMENTO (BOLETOS) ---
     elif modulo == "💸 Faturamento e Boletos":
         st.title("💸 Gestão de Recebíveis e Emissão")
