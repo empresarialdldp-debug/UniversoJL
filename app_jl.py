@@ -600,8 +600,24 @@ else:
             
         planilha_master = client_gspread.open_by_key(ID_PLANILHA_MASTER)
 
+        # --- CÉREBRO MATEMÁTICO BLINDADO ---
+        def safe_to_float(val):
+            if isinstance(val, (int, float)): return float(val)
+            val = str(val).replace('R$', '').replace(' ', '').strip()
+            if not val or val.lower() in ['nan', 'none', '']: return 0.0
+            
+            if ',' in val and '.' in val:
+                if val.rfind(',') > val.rfind('.'):
+                    val = val.replace('.', '').replace(',', '.')
+                else:
+                    val = val.replace(',', '')
+            elif ',' in val:
+                val = val.replace(',', '.')
+            try: return float(val)
+            except: return 0.0
+
         # ==========================================
-        # 1. PAINEL DE AJUSTES (COM CHAVE ÚNICA)
+        # 1. PAINEL DE AJUSTES (COM CHAVE ÚNICA E FLOAT PURO)
         # ==========================================
         st.subheader("🛠️ Lançar Documentação ou Correção")
         with st.expander("Clique para adicionar um valor ao saldo de um contrato"):
@@ -611,7 +627,6 @@ else:
                 try:
                     p_2026 = client_gspread.open_by_key(ID_PLANILHA_Recebimento_Wilson_Moreira_2026)
                     abas = p_2026.worksheets()
-                    
                     df_lista = pd.DataFrame()
                     for aba in abas:
                         dados_aba = aba.get_all_values()
@@ -631,10 +646,9 @@ else:
                         for _, row in df_lista.iterrows():
                             nome = str(row.get('NOME DO ADQUIRENTE', '')).strip()
                             unidade = str(row.get('DESCRIÇÃO RESUMIDA DA UNIDADE', '')).strip()
-                            # CRIA A CHAVE ÚNICA PARA O COMBOBOX
+                            
                             texto_combo = f"{nome}"
                             if unidade: texto_combo += f" - {unidade}"
-                            
                             if nome and texto_combo not in lista_formatada:
                                 lista_formatada.append(texto_combo)
                                 
@@ -646,31 +660,17 @@ else:
 
                 cliente_combo = col1.selectbox("Selecione o Contrato:", lista_clientes)
                 motivo_ajuste = col2.text_input("Motivo (Ex: Doc, INCC):")
-                valor_digitado = col3.text_input("Valor (R$):", placeholder="Ex: 1750,10")
+                valor_digitado = col3.text_input("Valor (R$):", placeholder="Ex: 1750.10 ou 1750,10")
                 
                 import datetime
                 data_selecionada = col4.date_input("Data do Lançamento:", value=datetime.date.today(), format="DD/MM/YYYY")
                 btn_salvar_ajuste = st.form_submit_button("💾 Salvar Correção no Contrato")
                 
-                # Tradutor de Moeda
-                try:
-                    v_str = valor_digitado.replace('R$', '').replace(' ', '').strip()
-                    if ',' in v_str and '.' in v_str:
-                        if v_str.rfind(',') > v_str.rfind('.'):
-                            v_str = v_str.replace('.', '').replace(',', '.') 
-                        else:
-                            v_str = v_str.replace(',', '') 
-                    elif ',' in v_str:
-                        v_str = v_str.replace(',', '.')
-                    valor_ajuste = float(v_str) if v_str else 0.0
-                except:
-                    valor_ajuste = 0.0
+                valor_ajuste = safe_to_float(valor_digitado)
                 
                 if btn_salvar_ajuste and cliente_combo and valor_ajuste > 0 and "Erro" not in cliente_combo:
                     try:
-                        # NÃO CORTA MAIS O NOME. Salva a chave inteira (Nome - Unidade) no banco de dados
                         chave_banco = cliente_combo.strip()
-
                         try:
                             aba_ajustes = planilha_master.worksheet("Ajustes_Contratos")
                         except:
@@ -678,10 +678,10 @@ else:
                             aba_ajustes.append_row(["Data_Registro", "Cliente", "Motivo", "Valor_Ajuste"])
                             
                         data_formatada = data_selecionada.strftime('%d/%m/%Y')
-                        # Salva o valor com vírgula para não bugar o Google Sheets Brasil
-                        valor_planilha = f"{valor_ajuste:.2f}".replace('.', ',')
                         
-                        aba_ajustes.append_row([data_formatada, chave_banco, motivo_ajuste, valor_planilha])
+                        # O PULO DO GATO: Enviando como um Float matemático puro, sem textos!
+                        aba_ajustes.append_row([data_formatada, chave_banco, motivo_ajuste, float(valor_ajuste)])
+                        
                         st.success(f"Acréscimo de R$ {valor_ajuste:.2f} salvo com sucesso para {chave_banco}!")
                         import time
                         time.sleep(1)
@@ -692,37 +692,30 @@ else:
         st.divider()
 
         # ==========================================
-        # 2. CONSOLIDAÇÃO E MATEMÁTICA DO DASHBOARD
+        # 2. CONSOLIDAÇÃO MATEMÁTICA
         # ==========================================
         with st.spinner("Consolidando Livro Razão, Contratos, Correções e Tributos..."):
             try:
-                # A. PAGAMENTOS (Livro Razão)
+                # A. PAGAMENTOS
                 aba_recebimentos = planilha_master.worksheet("Recebimentos_Master")
                 df_pagamentos = pd.DataFrame(aba_recebimentos.get_all_records())
-                
-                # Garante que as colunas existam para não dar erro
                 if 'Unidade' not in df_pagamentos.columns: df_pagamentos['Unidade'] = ""
                 
-                df_pagamentos['Valor_Recebido'] = pd.to_numeric(df_pagamentos['Valor_Recebido'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+                df_pagamentos['Valor_Recebido'] = df_pagamentos['Valor_Recebido'].apply(safe_to_float)
                 
-                # Cria a Chave Única nos pagamentos
                 df_pagamentos['Chave'] = df_pagamentos['Cliente'].astype(str).str.strip()
                 df_pagamentos.loc[df_pagamentos['Unidade'].str.strip() != "", 'Chave'] = df_pagamentos['Chave'] + " - " + df_pagamentos['Unidade'].astype(str).str.strip()
                 
                 df_resumo_pago = df_pagamentos.groupby('Chave')['Valor_Recebido'].sum().reset_index()
                 df_resumo_pago.rename(columns={'Valor_Recebido': 'Total_Pago'}, inplace=True)
 
-                # B. VALOR DOS CONTRATOS (Da planilha de 2026)
+                # B. CONTRATOS
                 if not df_lista.empty:
                     df_contratos = df_lista.copy()
-                    df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.')
-                    df_contratos['VALOR DA UNIDADE'] = pd.to_numeric(df_contratos['VALOR DA UNIDADE'], errors='coerce').fillna(0)
+                    df_contratos['VALOR DA UNIDADE'] = df_contratos['VALOR DA UNIDADE'].apply(safe_to_float)
                     
-                    # Cria a Chave Única nos contratos
                     df_contratos['Chave'] = df_contratos['NOME DO ADQUIRENTE'].astype(str).str.strip()
                     df_contratos.loc[df_contratos['DESCRIÇÃO RESUMIDA DA UNIDADE'].str.strip() != "", 'Chave'] = df_contratos['Chave'] + " - " + df_contratos['DESCRIÇÃO RESUMIDA DA UNIDADE'].astype(str).str.strip()
-                    
-                    # Agora o drop_duplicates remove apenas se a Chave for igual (permite o mesmo nome em unidades diferentes)
                     df_contratos = df_contratos[df_contratos['Chave'] != ""].drop_duplicates(subset=['Chave'])
                 else:
                     df_contratos = pd.DataFrame(columns=['Chave', 'VALOR DA UNIDADE'])
@@ -731,15 +724,14 @@ else:
                 try:
                     aba_ajustes = planilha_master.worksheet("Ajustes_Contratos")
                     df_aj = pd.DataFrame(aba_ajustes.get_all_records())
-                    df_aj['Valor_Ajuste'] = pd.to_numeric(df_aj['Valor_Ajuste'].astype(str).replace(',', '.'), errors='coerce').fillna(0)
+                    df_aj['Valor_Ajuste'] = df_aj['Valor_Ajuste'].apply(safe_to_float)
                     
-                    # Aqui o 'Cliente' na planilha de ajustes já é a Chave Completa salva no passo 1
                     df_resumo_ajustes = df_aj.groupby('Cliente')['Valor_Ajuste'].sum().reset_index()
                     df_resumo_ajustes.rename(columns={'Cliente': 'Chave'}, inplace=True)
                 except:
                     df_resumo_ajustes = pd.DataFrame(columns=['Chave', 'Valor_Ajuste'])
 
-                # D. O GRANDE CRUZAMENTO (AGORA PELA CHAVE ÚNICA)
+                # D. O GRANDE CRUZAMENTO
                 df_dash = pd.merge(df_contratos, df_resumo_ajustes, on='Chave', how='left').fillna(0)
                 df_dash = pd.merge(df_dash, df_resumo_pago, on='Chave', how='left').fillna(0)
 
@@ -756,17 +748,15 @@ else:
                 c1.metric("💰 VGV Atualizado", f"R$ {vgv_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                 c2.metric("✅ Caixa Realizado", f"R$ {recebido_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                 c3.metric("⚠️ Saldo Devedor", f"R$ {devedor_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                
                 st.divider()
 
                 # ==========================================
                 # ABAS DE ANÁLISE
                 # ==========================================
-                aba_tabela, aba_graficos = st.tabs(["🏢 Detalhamento (Investidores e Resumo Tributário)", "📈 Análise Gráfica (Mensal e Anual)"])
+                aba_tabela, aba_graficos = st.tabs(["🏢 Detalhamento (Investidores e Tributos)", "📈 Análise Gráfica (Mensal e Anual)"])
                 
                 with aba_tabela:
                     st.subheader("🏛️ Resumo Tributário Acumulado (Baseado no Caixa Realizado)")
-                    
                     pis_total = recebido_total * 0.0065
                     cofins_total = recebido_total * 0.03
                     csll_total = recebido_total * 0.0108
@@ -791,8 +781,6 @@ else:
 
                     st.divider()
                     st.subheader("Situação Individualizada por Contrato")
-                    
-                    # Agora a tabela exibe a Chave Única para você ver os apartamentos separados
                     df_visual = df_dash[['Chave', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
                     
                     df_visual['Progresso'] = df_visual.apply(
@@ -819,7 +807,6 @@ else:
                     st.subheader("Evolução do Caixa e Carga Tributária")
                     if not df_pagamentos.empty:
                         df_grafico = df_pagamentos.dropna(subset=['Data_FMT']).copy()
-                        
                         df_grafico['Mes_Periodo'] = df_grafico['Data_FMT'].dt.to_period('M')
                         df_mensal_graf = df_grafico.groupby('Mes_Periodo')['Valor_Recebido'].sum().reset_index()
 
@@ -829,11 +816,9 @@ else:
 
                         df_mensal_graf['Total_Tributos'] = df_mensal_graf['Impostos_Comuns'] + df_mensal_graf['IR_Adicional']
                         df_mensal_graf['Caixa_Livre_Liquido'] = df_mensal_graf['Valor_Recebido'] - df_mensal_graf['Total_Tributos']
-                        
                         df_mensal_graf['Mês/Ano'] = df_mensal_graf['Mes_Periodo'].dt.strftime('%m/%Y')
 
                         st.markdown("### 📅 Desempenho Mensal")
-                        st.caption("Visão do dinheiro que efetivamente ficou na conta vs Impostos gerados na competência.")
                         df_chart_m = df_mensal_graf[['Mês/Ano', 'Caixa_Livre_Liquido', 'Total_Tributos']].set_index('Mês/Ano')
                         st.bar_chart(df_chart_m, color=["#1f77b4", "#d62728"], height=350) 
                         
@@ -843,7 +828,6 @@ else:
                         df_anual = df_grafico.groupby('Ano')['Valor_Recebido'].sum().reset_index()
 
                         df_anual['Impostos_Comuns'] = df_anual['Valor_Recebido'] * (0.0065 + 0.03 + 0.0108 + 0.012)
-                        
                         soma_ir_adicional_anual = df_mensal_graf.groupby(df_mensal_graf['Mes_Periodo'].dt.year)['IR_Adicional'].sum().reset_index()
                         soma_ir_adicional_anual.columns = ['Ano', 'IR_Adicional']
                         soma_ir_adicional_anual['Ano'] = soma_ir_adicional_anual['Ano'].astype(str)
