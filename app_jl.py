@@ -916,10 +916,10 @@ else:
                 # ==========================================
                 with aba_boletos:
                     st.subheader("🧾 Emissão Lote de Boletos - Banco Inter")
-                    st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
+                    st.markdown("Edite os dados na tabela abaixo. Clique em **Salvar Alterações** e depois processe os boletos.")
                     
                     try:
-                        # 1. PUXA OS DADOS REAIS DO CLIENTE (CORREÇÃO DEFINITIVA DAS COLUNAS VAZIAS)
+                        # 1. PUXA OS DADOS REAIS DO CLIENTE
                         aba_clientes = planilha_master.worksheet("Cadastro_Clientes")
                         dados_aba = aba_clientes.get_all_values()
                         
@@ -932,7 +932,7 @@ else:
                         colunas_validas = [col for col in df_boletos_tela.columns if str(col).strip() != "" and not str(col).startswith("Unnamed")]
                         df_boletos_tela = df_boletos_tela[colunas_validas].copy()
                         
-                        # 2. INJETA "VENCIMENTO" E "SALDO_DEVEDOR" PARA SEREM EDITÁVEIS NA TELA
+                        # 2. INJETA "VENCIMENTO" E "SALDO_DEVEDOR" PARA SEREM EDITÁVEIS
                         import datetime as dt
                         data_padrao = (dt.datetime.today() + dt.timedelta(days=5)).strftime('%d/%m/%Y')
                         
@@ -969,8 +969,22 @@ else:
                         
                         col_btn1, col_btn2 = st.columns([2, 2])
                         
+                        # ==========================================
+                        # BOTÃO DE SALVAR (RESTAURADO)
+                        # ==========================================
+                        with col_btn1:
+                            if st.button("💾 Salvar Alterações na Planilha", use_container_width=True):
+                                try:
+                                    with st.spinner("Atualizando planilha..."):
+                                        df_para_salvar = df_editado.drop(columns=['Emitir'], errors='ignore').fillna("")
+                                        aba_clientes.clear()
+                                        aba_clientes.update([df_para_salvar.columns.values.tolist()] + df_para_salvar.values.tolist())
+                                    st.success("✅ Dados salvos com sucesso na aba Cadastro_Clientes!")
+                                except Exception as e:
+                                    st.error(f"Erro ao salvar: {e}")
+
                         with col_btn2:
-                            if st.button("🚀 Processar Boletos Selecionados", type="primary"):
+                            if st.button("🚀 Processar Boletos Selecionados", type="primary", use_container_width=True):
                                 clientes_selecionados = df_editado[df_editado['Emitir'] == True]
                                 
                                 if clientes_selecionados.empty:
@@ -1076,17 +1090,17 @@ else:
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
                                             controle = f"JL{idx}{segundos}"[:15]
                                             
+                                            # BYPASS DE BLOQUEIO DE SERVIDOR: USANDO BRASILAPI
                                             rua_encontrada, bairro_encontrado, cidade_encontrada, uf_encontrada = "Logradouro", "Bairro", "Cidade", "MG"
                                             if len(cep_limpo) == 8:
                                                 try:
-                                                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-                                                    resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", headers=headers, timeout=5)
-                                                    if resp_cep.status_code == 200 and 'erro' not in resp_cep.json():
-                                                        d_cep = resp_cep.json()
-                                                        if d_cep.get('logradouro'): rua_encontrada = d_cep.get('logradouro')
-                                                        if d_cep.get('bairro'): bairro_encontrado = d_cep.get('bairro')
-                                                        if d_cep.get('localidade'): cidade_encontrada = d_cep.get('localidade')
-                                                        if d_cep.get('uf'): uf_encontrada = d_cep.get('uf')
+                                                    resp_cep = requests.get(f"https://brasilapi.com.br/api/cep/v1/{cep_limpo}", timeout=5)
+                                                    if resp_cep.status_code == 200:
+                                                        dados_cep = resp_cep.json()
+                                                        rua_encontrada = dados_cep.get('street', rua_encontrada)
+                                                        bairro_encontrado = dados_cep.get('neighborhood', bairro_encontrado)
+                                                        cidade_encontrada = dados_cep.get('city', cidade_encontrada)
+                                                        uf_encontrada = dados_cep.get('state', uf_encontrada)
                                                 except: pass
                                                 
                                             try:
@@ -1186,18 +1200,12 @@ else:
                                                 else:
                                                     st.error(f"❌ O Banco aceitou a requisição, mas não retornou um rastreio.")
                                             
+                                            # EXTRATOR DE ERROS DETALHADO DO BANCO INTER
                                             except Exception as erro_emissao:
-                                                msg = str(erro_emissao)
+                                                erro_str = str(erro_emissao)
                                                 if hasattr(erro_emissao, 'error') and erro_emissao.error:
-                                                    msg = getattr(erro_emissao.error, 'detail', str(erro_emissao.error))
-                                                    if hasattr(erro_emissao.error, 'violacoes') and erro_emissao.error.violacoes:
-                                                        viols = []
-                                                        for v in erro_emissao.error.violacoes:
-                                                            prop = getattr(v, 'propriedade', 'Campo')
-                                                            razao = getattr(v, 'razao', 'Incorreto')
-                                                            viols.append(f"{prop}: {razao}")
-                                                        msg += " | Motivo detalhado: " + ", ".join(viols)
-                                                st.error(f"❌ Falha ao emitir {nome_completo}: {msg}")
+                                                    erro_str = getattr(erro_emissao.error, 'detail', str(erro_emissao.error))
+                                                st.error(f"❌ Falha ao emitir {nome_completo}. Motivo do Banco: {erro_str}")
                                                 
                                     finally:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
