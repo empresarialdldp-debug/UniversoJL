@@ -1163,7 +1163,7 @@ else:
                                     else:
                                         st.caption("Sem telefone cadastrado.")
             except Exception as e:
-                 st.error(f"Erro na aba de Boletos: {e}")
+                st.error(f"Erro na aba de Boletos: {e}")
                         
 
     
