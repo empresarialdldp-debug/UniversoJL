@@ -893,7 +893,7 @@ else:
                             else:
                                 st.warning("Nenhum pagamento localizado para esta chave exata.")
                         
-                    with col_btn2:
+                        with col_btn2:
                             if st.button("🚀 Processar Boletos Selecionados", type="primary"):
                                 clientes_selecionados = df_editado[df_editado['Emitir'] == True]
                                 
