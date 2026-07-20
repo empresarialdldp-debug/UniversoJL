@@ -911,7 +911,7 @@ else:
                             except Exception as e:
                                 st.caption(f"Sem histórico de ajustes na base. {e}")
 
-               # ==========================================
+              # ==========================================
                 # ABA DE BOLETOS
                 # ==========================================
                 with aba_boletos:
@@ -1220,8 +1220,6 @@ else:
                                         st.caption("Sem telefone cadastrado.")
                     except Exception as e:
                         st.error(f"Erro ao carregar a aba 'Cadastro_Clientes': {e}")
-            except Exception as e:
-                st.error(f"Erro ao processar o Dashboard: {e}")
                         
 
     
