@@ -918,12 +918,15 @@ else:
                     st.subheader("🧾 Emissão Lote de Boletos - Banco Inter")
                     st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
                     
-                    # 👇 COLOQUE O NOME DO SEU DATAFRAME ORIGINAL AQUI (o que tem Nome, CPF, WhatsApp, etc)
-                    df_boletos_tela = NOME_DO_SEU_DATAFRAME_ORIGINAL.copy() 
+                    # 1. PEGA O DF_DASH E LIMPA COLUNAS VAZIAS/FANTASMAS (Evita o erro da tabela)
+                    colunas_validas = [col for col in df_dash.columns if str(col).strip() != "" and not str(col).startswith("Unnamed")]
+                    df_boletos_tela = df_dash[colunas_validas].copy()
                     
+                    # 2. ADICIONA A CAIXINHA DE SELEÇÃO
                     if 'Emitir' not in df_boletos_tela.columns:
                         df_boletos_tela.insert(0, 'Emitir', False)
                         
+                    # 3. DESENHA A TABELA NA TELA
                     df_editado = st.data_editor(
                         df_boletos_tela,
                         column_config={"Emitir": st.column_config.CheckboxColumn("Gerar?", default=False)},
@@ -932,6 +935,10 @@ else:
                     )
                     
                     col_btn1, col_btn2 = st.columns([2, 2])
+                    
+                    with col_btn2:
+                        if st.button("🚀 Processar Boletos Selecionados", type="primary"):
+                            # O SEU CÓDIGO DO BANCO INTER E DO DRIVE CONTINUA INTACTO DAQUI PARA BAIXO
                     
                     with col_btn2:
                         if st.button("🚀 Processar Boletos Selecionados", type="primary"):
