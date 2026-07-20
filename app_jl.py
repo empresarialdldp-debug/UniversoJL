@@ -1007,38 +1007,39 @@ else:
                                         # 3. MOTOR DE EMISSÃO
                                         # ==========================================
                                         for idx, row in clientes_selecionados.iterrows():
-                                            # LÊ COLUNA CORRETA (Nome_Base)
-                                            val_nome = row.get('Nome_Base', row.get('Nome_Cliente', ''))
+                                            # LÊ AS COLUNAS EXATAS DA SUA PLANILHA
+                                            val_nome = row.get('Nome_Base', '')
                                             val_cpf = row.get('CPF_CNPJ', '')
                                             val_zap = row.get('WhatsApp', '')
                                             val_cep = row.get('CEP', '30000000')
-                                            val_valor = row.get('Valor_Parcela', row.get('Valor', 0.0))
-                                            val_venc = row.get('Vencimento', dt.datetime.today().strftime('%d/%m/%Y'))
                                             val_num = row.get('Numero', '0')
+                                            complemento_txt = str(row.get('Complemento', '')).strip()
+                                            
+                                            try: 
+                                                valor_str = str(row.get('Valor_Parcela', '0')).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
+                                                valor = float(valor_str)
+                                            except: 
+                                                valor = 0.0
+                                                
+                                            val_venc = row.get('Vencimento', dt.datetime.today().strftime('%d/%m/%Y'))
+                                            vencimento = str(val_venc)
+                                            
+                                            saldo_devedor = float(row.get('Saldo_Devedor', 0.0))
                                             
                                             nome_completo = str(val_nome).split('-')[0].strip()[:100]
                                             cpf_cnpj_limpo = re.sub(r'\D', '', str(val_cpf))
-                                            zap = str(val_zap).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                                            zap = re.sub(r'\D', '', str(val_zap))
                                             cep_limpo = re.sub(r'\D', '', str(val_cep))
                                             numero = str(val_num).strip() if str(val_num).strip() != "" else "0"
                                             
-                                            try: 
-                                                valor = float(str(val_valor).replace(',', '.'))
-                                            except Exception: 
-                                                valor = 0.0
-                                                
-                                            vencimento = str(val_venc)
-                                            saldo_devedor = float(row.get('Saldo_Devedor', 0))
-                                            
-                                            # Travas
-                                            if not nome_completo or nome_completo.lower() == "nan":
-                                                st.error(f"❌ Linha {idx}: Nome do cliente não encontrado.")
+                                            if not nome_completo or nome_completo.lower() in ["nan", "none", ""]:
+                                                st.error(f"❌ Linha ignorada: A coluna 'Nome_Base' está vazia.")
                                                 continue
                                             if len(cpf_cnpj_limpo) < 11:
-                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido.")
+                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido ou ausente.")
                                                 continue
                                             if valor <= 0:
-                                                st.error(f"❌ {nome_completo}: Valor da parcela está zerado.")
+                                                st.error(f"❌ {nome_completo}: O Valor_Parcela está zerado.")
                                                 continue
                                             
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
@@ -1072,8 +1073,8 @@ else:
                                                 pagador.uf = pagador.state = uf_encontrada
                                                 pagador.bairro = pagador.neighborhood = bairro_encontrado
                                                 
-                                                complemento_txt = str(row.get('Complemento', '')).strip()
-                                                if complemento_txt: pagador.complemento = pagador.complement = complemento_txt
+                                                if complemento_txt and str(complemento_txt).lower() != "nan": 
+                                                    pagador.complemento = pagador.complement = complemento_txt
                                                 
                                                 p_type = PersonType.FISICA if len(cpf_cnpj_limpo) <= 11 else PersonType.JURIDICA
                                                 pagador.tipo_pessoa = pagador.tipoPessoa = pagador.person_type = pagador.personType = p_type
@@ -1086,7 +1087,6 @@ else:
                                                 boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
                                                 boleto.pagador = boleto.payer = pagador
                                                 
-                                                # Juros e Multa
                                                 boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
                                                 try:
                                                     from inter_sdk_python.billing.models.Fine import Fine
@@ -1162,32 +1162,32 @@ else:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
 
-                    # Renderiza os resultados do processamento
-                    if st.session_state.get("boletos_processados"):
-                        st.divider()
-                        st.markdown("### 🗂️ Boletos Prontos para Envio")
-                        
-                        for i, bol in enumerate(st.session_state.boletos_processados):
-                            colA, colB, colC = st.columns([3, 2, 2])
-                            colA.markdown(f"**{bol['nome']}**")
+                        # Renderiza os resultados do processamento
+                        if st.session_state.get("boletos_processados"):
+                            st.divider()
+                            st.markdown("### 🗂️ Boletos Prontos para Envio")
                             
-                            with colB:
-                                if bol['link_drive']:
-                                    st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
-                                else:
-                                    st.download_button(
-                                        label="📥 Baixar PDF Original",
-                                        data=bol['arquivo'],
-                                        file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
-                                        mime="application/pdf",
-                                        key=f"dl_{i}"
-                                    )
-                            
-                            with colC:
-                                if bol['link_wa']:
-                                    st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
-                                else:
-                                    st.caption("Sem telefone cadastrado.")
+                            for i, bol in enumerate(st.session_state.boletos_processados):
+                                colA, colB, colC = st.columns([3, 2, 2])
+                                colA.markdown(f"**{bol['nome']}**")
+                                
+                                with colB:
+                                    if bol['link_drive']:
+                                        st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
+                                    else:
+                                        st.download_button(
+                                            label="📥 Baixar PDF Original",
+                                            data=bol['arquivo'],
+                                            file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
+                                            mime="application/pdf",
+                                            key=f"dl_{i}"
+                                        )
+                                
+                                with colC:
+                                    if bol['link_wa']:
+                                        st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
+                                    else:
+                                        st.caption("Sem telefone cadastrado.")
                     except Exception as e:
                         st.error(f"Erro ao carregar a aba 'Cadastro_Clientes': {e}")
             except Exception as e:
