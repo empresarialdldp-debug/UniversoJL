@@ -1066,7 +1066,7 @@ else:
                                             
                                             valor = extrair_float(row.get('Valor_Parcela', 0.0))
                                             saldo_devedor = extrair_float(row.get('Saldo_Devedor', 0.0))
-                                            vencimento = str(row.get('Vencimento', data_padrao)).strip()
+                                            vencimento = str(row.get('Vencimento', '')).strip()
                                             
                                             nome_completo = str(val_nome).split('-')[0].strip()[:100]
                                             cpf_cnpj_limpo = re.sub(r'\D', '', str(val_cpf))
@@ -1132,13 +1132,8 @@ else:
                                                 boleto.pagador = boleto.payer = pagador
                                                 
                                                 boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
-                                                try:
-                                                    from inter_sdk_python.billing.models.Fine import Fine
-                                                    from inter_sdk_python.billing.models.Mora import Mora
-                                                    multa = Fine(); multa.codigo_multa = multa.codigoMulta = "PERCENTUAL"; multa.taxa = Decimal("2.00"); boleto.multa = boleto.fine = multa
-                                                    mora = Mora(); mora.codigo_mora = mora.codigoMora = "TAXA_MENSAL"; mora.taxa = Decimal("1.00"); boleto.mora = mora
-                                                except Exception:
-                                                    pass 
+                                                
+                                                # MULTA E MORA REMOVIDOS AQUI PARA DESTRAVAR A EMISSÃO DO BANCO
 
                                                 res = sdk.billing().issue_billing(boleto)
                                                 
@@ -1197,7 +1192,7 @@ else:
                                                 else:
                                                     st.error(f"❌ O Banco aceitou a requisição, mas não retornou um rastreio.")
                                             
-                                            # EXTRATOR DE ERROS DETALHADO DO BANCO INTER (SEU LOG)
+                                            # EXTRATOR DE ERROS DETALHADO DO BANCO INTER
                                             except Exception as erro_emissao:
                                                 st.error(f"❌ Falha ao emitir {nome_completo}.")
                                                 
@@ -1233,7 +1228,6 @@ else:
                                     finally:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
-
                         if st.session_state.get("boletos_processados"):
                             st.divider()
                             st.markdown("### 🗂️ Boletos Prontos para Envio")
