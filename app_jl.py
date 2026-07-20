@@ -918,65 +918,131 @@ else:
                                 
                 with aba_boletos:
                     st.subheader("🧾 Painel de Emissão de Boletos - J&L Incorporadora")
-                    st.markdown("Marque os clientes que receberão cobrança, ajuste datas e valores, preencha o celular e clique em Emitir.")
+                    st.markdown("Marque os clientes, edite os dados e clique em **Salvar Dados Cadastrais** para não precisar digitar novamente no mês que vem.")
                     
                     df_devedores = df_dash[df_dash['Saldo_Devedor'] > 0].copy()
                     
                     if not df_devedores.empty:
+                        # 1. BUSCANDO OU CRIANDO A MEMÓRIA (CADASTRO_CLIENTES)
+                        try:
+                            aba_cadastro = planilha_master.worksheet("Cadastro_Clientes")
+                            dados_cadastro = aba_cadastro.get_all_records()
+                            df_cadastro = pd.DataFrame(dados_cadastro)
+                        except:
+                            # Se a aba não existe, o robô cria e injeta os dados da imagem do Wilson Moreira
+                            aba_cadastro = planilha_master.add_worksheet(title="Cadastro_Clientes", rows="100", cols="8")
+                            cabecalho = ["Nome_Base", "CPF_CNPJ", "CEP", "Numero", "Complemento", "WhatsApp", "Valor_Parcela"]
+                            
+                            # Dados extraídos fielmente da sua imagem
+                            dados_iniciais = [
+                                ["EDSON FERREIRA TOLEDO", "534.142.506-59", "32606-016", "243", "", "(31) 9977-77088", "8972.22"],
+                                ["ARLEY FRANÇA LEITE", "938.501.406-44", "31330-020", "446", "Apto 504", "(31) 9877-66564", "6078.53"],
+                                ["MARCELO MAIA TEODORO", "065.584.286-10", "31330-040", "274", "Apto 401", "(31) 99632-6633", "2333.33"],
+                                ["THALIS RODRIGUES DE PAULA", "116.999.526-80", "31110-130", "815", "Apto 101", "(31) 98573-1001", "1166.67"],
+                                ["RAMON DE SOUZA MACHADO", "126.499.496-60", "30493-165", "158", "Apto 1002", "(31) 98422-7841", "1166.67"],
+                                ["HENRIQUE SETTE GARCIA DE AGUIAR", "066.457.586-26", "31330-180", "476", "Apto 201", "(31) 97526-2097", "6944.44"],
+                                ["RODRIGO ANTUNES DE BARCELOS", "042.978.516-01", "30640-120", "465", "", "(31) 98812-5970", "729.17"],
+                                ["MARCIO MACEDO MOURA JUNIOR", "067.448.136-41", "30570-080", "660", "Apto 702", "(31) 99924-6557", "9500"],
+                                ["MARCIO MACEDO MOURA", "130.839.966-91", "31035-512", "1400", "Apto 106", "(31) 98414-0891", "8194.44"],
+                                ["CLAUDISON NEIVA RESENDE", "010.766.576-05", "34800-000", "5100", "", "(31) 9921-77045", "11250"],
+                                ["ERLY GOMES ARAUJO", "566.228.726-00", "30664-790", "633", "", "(31) 98842-7587", "3820.84"],
+                                ["ESTEVÃO TELES DE JESUS JUNIOR", "036.195.216-38", "30840-390", "46", "Apto 301", "(31) 99954-4698", "1204"],
+                                ["RAPHAEL DE MATOS MARTINS", "078.314.016-95", "34710-210", "747", "Apto 404", "(31) 98865-9145", "1299.08"],
+                                ["RAQUEL MARIANO DOS SANTOS", "559.863.156-34", "20541-190", "299", "Casa 10", "(21) 99941-6820", "8888.89"],
+                                ["VLADIMIR RODRIGUES MILAGRES", "861.640.076-15", "31720-350", "293", "", "(31) 99192-0470", "1299.08"],
+                                ["RICARDO VIEIRA NUNES", "056.882.776-70", "30575-080", "163", "AP 1200", "(31) 98822-5236", "2106.16"]
+                            ]
+                            aba_cadastro.append_row(cabecalho)
+                            for linha in dados_iniciais:
+                                aba_cadastro.append_row(linha)
+                            df_cadastro = pd.DataFrame(dados_iniciais, columns=cabecalho)
+
+                        # 2. CRUZANDO OS DADOS ATUAIS COM A MEMÓRIA
+                        df_devedores['Nome_Base'] = df_devedores['Chave'].apply(lambda x: str(x).split('-')[0].strip().upper())
+                        df_cadastro['Nome_Base'] = df_cadastro['Nome_Base'].astype(str).str.strip().str.upper()
+                        
+                        df_emissao_cruza = pd.merge(df_devedores, df_cadastro, on='Nome_Base', how='left').fillna("")
+                        
                         df_emissao = pd.DataFrame()
                         df_emissao['Emitir'] = False
-                        df_emissao['Nome_Cliente'] = df_devedores['Chave']
-                        df_emissao['CPF_CNPJ'] = ""
-                        df_emissao['CEP'] = ""
+                        df_emissao['Nome_Cliente'] = df_emissao_cruza['Chave']
+                        df_emissao['CPF_CNPJ'] = df_emissao_cruza['CPF_CNPJ']
+                        df_emissao['CEP'] = df_emissao_cruza['CEP']
+                        df_emissao['Numero'] = df_emissao_cruza['Numero']
+                        df_emissao['Complemento'] = df_emissao_cruza['Complemento']
                         df_emissao['Vencimento'] = (pd.Timestamp.now() + pd.Timedelta(days=5)).strftime('%d/%m/%Y')
-                        df_emissao['Valor_Parcela'] = 0.00
-                        df_emissao['Descricao'] = "Parcela do Empreendimento J&L Incorporadora - Saldo Devedor: R$ " + df_devedores['Saldo_Devedor'].apply(lambda x: f"{x:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                        df_emissao['WhatsApp'] = "" 
-                        df_emissao['Saldo_Devedor'] = df_devedores['Saldo_Devedor']
+                        
+                        # Traz o valor padrão se existir, senão 0.00
+                        df_emissao['Valor_Parcela'] = df_emissao_cruza['Valor_Parcela'].apply(lambda x: safe_to_float(x) if x != "" else 0.00)
+                        
+                        df_emissao['Descricao'] = "Parcela - Saldo Devedor: R$ " + df_emissao_cruza['Saldo_Devedor'].apply(lambda x: f"{x:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                        df_emissao['WhatsApp'] = df_emissao_cruza['WhatsApp']
+                        df_emissao['Saldo_Devedor'] = df_emissao_cruza['Saldo_Devedor']
+                        
+                        st.caption("Qualquer alteração feita nas colunas de CPF, CEP, Número, Complemento, WhatsApp e Valor da Parcela pode ser salva permanentemente clicando no botão abaixo da tabela.")
                         
                         df_editado = st.data_editor(
                             df_emissao,
                             column_config={
                                 "Emitir": st.column_config.CheckboxColumn("Gerar?", default=False),
                                 "Nome_Cliente": st.column_config.TextColumn("Cliente / Contrato", disabled=True),
-                                "CPF_CNPJ": st.column_config.TextColumn("CPF/CNPJ (Apenas números)"),
-                                "CEP": st.column_config.TextColumn("CEP (Apenas números)"),
-                                "Vencimento": st.column_config.TextColumn("Vencimento (DD/MM/AAAA)"),
-                                "Valor_Parcela": st.column_config.NumberColumn("Valor Boleto", format="R$ %.2f"),
+                                "CPF_CNPJ": st.column_config.TextColumn("CPF/CNPJ"),
+                                "CEP": st.column_config.TextColumn("CEP"),
+                                "Numero": st.column_config.TextColumn("Nº"),
+                                "Complemento": st.column_config.TextColumn("Comp."),
+                                "Vencimento": st.column_config.TextColumn("Venc. (DD/MM/AAAA)"),
+                                "Valor_Parcela": st.column_config.NumberColumn("Valor R$", format="R$ %.2f"),
                                 "Descricao": st.column_config.TextColumn("Descrição na Fatura"),
-                                "WhatsApp": st.column_config.TextColumn("WhatsApp (Ex: 31999999999)"),
-                                "Saldo_Devedor": st.column_config.NumberColumn("Saldo Devedor", format="R$ %.2f", disabled=True)
+                                "WhatsApp": st.column_config.TextColumn("WhatsApp"),
+                                "Saldo_Devedor": st.column_config.NumberColumn("Saldo Restante", format="R$ %.2f", disabled=True)
                             },
                             hide_index=True,
-                            use_container_width=True
+                            use_container_width=True,
+                            height=400
                         )
                         
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        btn_emitir = st.button("🚀 Processar Boletos Selecionados", type="primary")
-                            
-                        if btn_emitir:
-                            clientes_selecionados = df_editado[df_editado['Emitir'] == True]
-                            
-                            if clientes_selecionados.empty:
-                                st.warning("Selecione pelo menos um cliente marcando a caixa 'Gerar?'.")
-                            else:
-                                st.success(f"Preparando boletos para {len(clientes_selecionados)} cliente(s)...")
+                        col_btn1, col_btn2 = st.columns([1, 1])
+                        
+                        # --- BOTÃO PARA SALVAR A MEMÓRIA ---
+                        with col_btn1:
+                            if st.button("💾 Salvar Dados Cadastrais"):
+                                with st.spinner("Atualizando banco de dados..."):
+                                    # Pega os dados editados, extrai o nome base e salva no Sheets
+                                    df_para_salvar = df_editado[['Nome_Cliente', 'CPF_CNPJ', 'CEP', 'Numero', 'Complemento', 'WhatsApp', 'Valor_Parcela']].copy()
+                                    df_para_salvar['Nome_Base'] = df_para_salvar['Nome_Cliente'].apply(lambda x: str(x).split('-')[0].strip().upper())
+                                    df_para_salvar = df_para_salvar[['Nome_Base', 'CPF_CNPJ', 'CEP', 'Numero', 'Complemento', 'WhatsApp', 'Valor_Parcela']]
+                                    
+                                    # Limpa a aba e reescreve com os novos dados
+                                    aba_cadastro.clear()
+                                    aba_cadastro.update([df_para_salvar.columns.values.tolist()] + df_para_salvar.values.tolist())
+                                    st.success("✅ Base de clientes atualizada com sucesso no Google Sheets!")
+                                    
+                        # --- BOTÃO DE EMISSÃO ---
+                        with col_btn2:
+                            if st.button("🚀 Processar Boletos Selecionados", type="primary"):
+                                clientes_selecionados = df_editado[df_editado['Emitir'] == True]
                                 
-                                for idx, row in clientes_selecionados.iterrows():
-                                    nome_completo = row['Nome_Cliente'].split('-')[0].strip()
-                                    zap = str(row['WhatsApp']).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                                    valor = row['Valor_Parcela']
-                                    vencimento = row['Vencimento']
+                                if clientes_selecionados.empty:
+                                    st.warning("Selecione pelo menos um cliente marcando a caixa 'Gerar?'.")
+                                else:
+                                    st.success(f"Preparando boletos para {len(clientes_selecionados)} cliente(s)...")
                                     
-                                    link_boleto = "https://bancointer.com.br/boleto/exemplo_jl_123" 
-                                    
-                                    if len(zap) >= 10:
-                                        texto_msg = f"Olá {nome_completo}, segue o link do seu boleto com vencimento em {vencimento} no valor de R$ {valor:.2f}: {link_boleto}".replace(' ', '%20')
-                                        link_wa = f"https://wa.me/55{zap}?text={texto_msg}"
+                                    for idx, row in clientes_selecionados.iterrows():
+                                        nome_completo = row['Nome_Cliente'].split('-')[0].strip()
+                                        zap = str(row['WhatsApp']).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                                        valor = row['Valor_Parcela']
+                                        vencimento = row['Vencimento']
                                         
-                                        st.markdown(f"✅ Fatura de **{nome_completo}** gerada! ➔ [📲 Enviar Boleto via WhatsApp]({link_wa})")
-                                    else:
-                                        st.markdown(f"✅ Fatura de **{nome_completo}** gerada! *(Telefone em branco)* ➔ Link: {link_boleto}")
+                                        # Link simulado (o Banco Inter SDK entrará aqui depois)
+                                        link_boleto = "https://bancointer.com.br/boleto/exemplo_jl_123" 
+                                        
+                                        if len(zap) >= 10:
+                                            texto_msg = f"Olá {nome_completo}, segue o link do seu boleto com vencimento em {vencimento} no valor de R$ {valor:.2f}: {link_boleto}".replace(' ', '%20')
+                                            link_wa = f"https://wa.me/55{zap}?text={texto_msg}"
+                                            
+                                            st.markdown(f"✅ Fatura de **{nome_completo}** gerada! ➔ [📲 Enviar Boleto via WhatsApp]({link_wa})")
+                                        else:
+                                            st.markdown(f"✅ Fatura de **{nome_completo}** gerada! *(Telefone em branco)* ➔ Link: {link_boleto}")
                     else:
                         st.success("🎉 Todos os contratos quitados.")
                         
