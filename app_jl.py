@@ -1129,7 +1129,13 @@ else:
 
                                                 # Emissão Direta
                                                 res = sdk.billing().issue_billing(boleto)
-                                                n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None)
+                                                
+                                                # Tenta ler como dicionário ou como objeto
+                                                n_num = None
+                                                if isinstance(res, dict):
+                                                    n_num = res.get('nossoNumero') or res.get('nosso_numero')
+                                                else:
+                                                    n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None)
                                                 
                                                 if n_num:
                                                     st.info(f"⏳ Aguardando renderização do boleto de {nome_completo} (NN: {n_num})...")
@@ -1154,7 +1160,12 @@ else:
                                                     except Exception as erro_pdf:
                                                         st.warning(f"⚠️ Boleto gerado, mas erro ao baixar PDF: {erro_pdf}")
                                                 else:
-                                                    st.error(f"❌ Banco não retornou Nosso Número para {nome_completo}.")
+                                                    # RAIO-X DA RESPOSTA DO BANCO
+                                                    st.error(f"❌ Banco não retornou Nosso Número para {nome_completo}. Veja a resposta crua do banco abaixo:")
+                                                    try:
+                                                        st.json(res if isinstance(res, dict) else res.__dict__)
+                                                    except:
+                                                        st.write(dir(res))
                                             
                                             except Exception as erro_emissao:
                                                 msg = str(erro_emissao)
