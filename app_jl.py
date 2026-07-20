@@ -916,9 +916,12 @@ else:
                             except:
                                 st.info("Sem base de ajustes.")
                                 
+                # ==========================================
+                # NOVA ABA: EMISSÃO DE BOLETOS E WHATSAPP (COM VIA CEP)
+                # ==========================================
                 with aba_boletos:
                     st.subheader("🧾 Painel de Emissão de Boletos - J&L Incorporadora")
-                    st.markdown("Marque os clientes, edite os dados e clique em **Salvar Dados Cadastrais** para não precisar digitar novamente no mês que vem.")
+                    st.markdown("Marque os clientes, edite os dados e clique em **Salvar Dados Cadastrais**. O sistema buscará o nome da rua automaticamente pelo CEP na hora da emissão.")
                     
                     df_devedores = df_dash[df_dash['Saldo_Devedor'] > 0].copy()
                     
@@ -929,11 +932,9 @@ else:
                             dados_cadastro = aba_cadastro.get_all_records()
                             df_cadastro = pd.DataFrame(dados_cadastro)
                         except:
-                            # Se a aba não existe, o robô cria e injeta os dados da imagem do Wilson Moreira
                             aba_cadastro = planilha_master.add_worksheet(title="Cadastro_Clientes", rows="100", cols="8")
                             cabecalho = ["Nome_Base", "CPF_CNPJ", "CEP", "Numero", "Complemento", "WhatsApp", "Valor_Parcela"]
                             
-                            # Dados extraídos fielmente da sua imagem
                             dados_iniciais = [
                                 ["EDSON FERREIRA TOLEDO", "534.142.506-59", "32606-016", "243", "", "(31) 9977-77088", "8972.22"],
                                 ["ARLEY FRANÇA LEITE", "938.501.406-44", "31330-020", "446", "Apto 504", "(31) 9877-66564", "6078.53"],
@@ -957,7 +958,7 @@ else:
                                 aba_cadastro.append_row(linha)
                             df_cadastro = pd.DataFrame(dados_iniciais, columns=cabecalho)
 
-                        # 2. CRUZANDO OS DADOS ATUAIS COM A MEMÓRIA
+                        # 2. CRUZANDO OS DADOS E CORRIGINDO O TIPO DO NÚMERO
                         df_devedores['Nome_Base'] = df_devedores['Chave'].apply(lambda x: str(x).split('-')[0].strip().upper())
                         df_cadastro['Nome_Base'] = df_cadastro['Nome_Base'].astype(str).str.strip().str.upper()
                         
@@ -966,20 +967,20 @@ else:
                         df_emissao = pd.DataFrame()
                         df_emissao['Emitir'] = False
                         df_emissao['Nome_Cliente'] = df_emissao_cruza['Chave']
-                        df_emissao['CPF_CNPJ'] = df_emissao_cruza['CPF_CNPJ']
-                        df_emissao['CEP'] = df_emissao_cruza['CEP']
-                        df_emissao['Numero'] = df_emissao_cruza['Numero']
-                        df_emissao['Complemento'] = df_emissao_cruza['Complemento']
+                        df_emissao['CPF_CNPJ'] = df_emissao_cruza['CPF_CNPJ'].astype(str)
+                        df_emissao['CEP'] = df_emissao_cruza['CEP'].astype(str)
+                        
+                        # FORÇANDO O NÚMERO A SER TEXTO PURO (Sem o .0)
+                        df_emissao['Numero'] = df_emissao_cruza['Numero'].astype(str).apply(lambda x: x.split('.')[0] if '.' in x else x)
+                        
+                        df_emissao['Complemento'] = df_emissao_cruza['Complemento'].astype(str)
                         df_emissao['Vencimento'] = (pd.Timestamp.now() + pd.Timedelta(days=5)).strftime('%d/%m/%Y')
-                        
-                        # Traz o valor padrão se existir, senão 0.00
                         df_emissao['Valor_Parcela'] = df_emissao_cruza['Valor_Parcela'].apply(lambda x: safe_to_float(x) if x != "" else 0.00)
-                        
                         df_emissao['Descricao'] = "Parcela - Saldo Devedor: R$ " + df_emissao_cruza['Saldo_Devedor'].apply(lambda x: f"{x:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                        df_emissao['WhatsApp'] = df_emissao_cruza['WhatsApp']
+                        df_emissao['WhatsApp'] = df_emissao_cruza['WhatsApp'].astype(str)
                         df_emissao['Saldo_Devedor'] = df_emissao_cruza['Saldo_Devedor']
                         
-                        st.caption("Qualquer alteração feita nas colunas de CPF, CEP, Número, Complemento, WhatsApp e Valor da Parcela pode ser salva permanentemente clicando no botão abaixo da tabela.")
+                        st.caption("Qualquer alteração feita nas colunas cadastrais pode ser salva permanentemente clicando no botão abaixo.")
                         
                         df_editado = st.data_editor(
                             df_emissao,
@@ -1003,21 +1004,17 @@ else:
                         
                         col_btn1, col_btn2 = st.columns([1, 1])
                         
-                        # --- BOTÃO PARA SALVAR A MEMÓRIA ---
                         with col_btn1:
                             if st.button("💾 Salvar Dados Cadastrais"):
                                 with st.spinner("Atualizando banco de dados..."):
-                                    # Pega os dados editados, extrai o nome base e salva no Sheets
                                     df_para_salvar = df_editado[['Nome_Cliente', 'CPF_CNPJ', 'CEP', 'Numero', 'Complemento', 'WhatsApp', 'Valor_Parcela']].copy()
                                     df_para_salvar['Nome_Base'] = df_para_salvar['Nome_Cliente'].apply(lambda x: str(x).split('-')[0].strip().upper())
                                     df_para_salvar = df_para_salvar[['Nome_Base', 'CPF_CNPJ', 'CEP', 'Numero', 'Complemento', 'WhatsApp', 'Valor_Parcela']]
                                     
-                                    # Limpa a aba e reescreve com os novos dados
                                     aba_cadastro.clear()
                                     aba_cadastro.update([df_para_salvar.columns.values.tolist()] + df_para_salvar.values.tolist())
                                     st.success("✅ Base de clientes atualizada com sucesso no Google Sheets!")
                                     
-                        # --- BOTÃO DE EMISSÃO ---
                         with col_btn2:
                             if st.button("🚀 Processar Boletos Selecionados", type="primary"):
                                 clientes_selecionados = df_editado[df_editado['Emitir'] == True]
@@ -1030,10 +1027,33 @@ else:
                                     for idx, row in clientes_selecionados.iterrows():
                                         nome_completo = row['Nome_Cliente'].split('-')[0].strip()
                                         zap = str(row['WhatsApp']).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                                        cep_limpo = str(row['CEP']).replace('-', '').replace('.', '').strip()
                                         valor = row['Valor_Parcela']
                                         vencimento = row['Vencimento']
+                                        numero = row['Numero']
                                         
-                                        # Link simulado (o Banco Inter SDK entrará aqui depois)
+                                        # 3. BUSCA INTELIGENTE DO ENDEREÇO "POR DENTRO" VIA API
+                                        rua_encontrada = "Endereço Padrão"
+                                        bairro_encontrado = "Bairro Padrão"
+                                        cidade_encontrada = "Belo Horizonte"
+                                        uf_encontrada = "MG"
+                                        
+                                        if len(cep_limpo) == 8:
+                                            try:
+                                                resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
+                                                if resp_cep.status_code == 200:
+                                                    dados_cep = resp_cep.json()
+                                                    if 'erro' not in dados_cep:
+                                                        rua_encontrada = dados_cep.get('logradouro', rua_encontrada)
+                                                        bairro_encontrado = dados_cep.get('bairro', bairro_encontrado)
+                                                        cidade_encontrada = dados_cep.get('localidade', cidade_encontrada)
+                                                        uf_encontrada = dados_cep.get('uf', uf_encontrada)
+                                            except:
+                                                pass
+                                                
+                                        # (AQUI ENTRARÁ O CÓDIGO DO BANCO INTER USANDO AS VARIÁVEIS ACIMA)
+                                        # st.write(f"Enviando para o Inter: {rua_encontrada}, {numero} - {bairro_encontrado}, {cidade_encontrada}/{uf_encontrada}")
+                                        
                                         link_boleto = "https://bancointer.com.br/boleto/exemplo_jl_123" 
                                         
                                         if len(zap) >= 10:
