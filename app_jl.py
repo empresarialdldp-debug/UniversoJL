@@ -622,77 +622,78 @@ else:
             except: return 0.0
 
         # ==========================================
-        # 1. PAINEL DE AJUSTES (COM CHAVE ÚNICA E FLOAT PURO)
-        # ==========================================
-        st.subheader("🛠️ Lançar Documentação ou Correção")
-        with st.expander("Clique para adicionar um valor ao saldo de um contrato"):
-            with st.form("form_correcao", clear_on_submit=True):
-                col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
-                
-                try:
-                    p_2026 = client_gspread.open_by_key(ID_PLANILHA_Recebimento_Wilson_Moreira_2026)
-                    abas = p_2026.worksheets()
-                    df_lista = pd.DataFrame()
-                    for aba in abas:
-                        dados_aba = aba.get_all_values()
-                        if len(dados_aba) > 3:
-                            cab = [str(c).strip().upper() for c in dados_aba[2]]
-                            if "NOME DO ADQUIRENTE" in cab:
-                                df_lista = pd.DataFrame(dados_aba[3:], columns=cab)
-                                break
+                # NOVA ABA: EXTRATO DO INVESTIDOR (AUDITORIA)
+                # ==========================================
+                with aba_extrato:
+                    st.subheader("🔎 Auditoria: Extrato de Pagamentos e Ajustes")
+                    st.markdown("Selecione um contrato para verificar todas as parcelas e taxas que o sistema encontrou para ele.")
                     
-                    if not df_lista.empty:
-                        termos_excluir = ['BASE IR', 'IR', 'IR ADICIONAL', 'CSLL', 'VALOR LIQUIDO', 'VALOR BRUTO', 'PIS', 'COFINS', 'VALOR DA VENDA']
-                        df_lista = df_lista[~df_lista['NOME DO ADQUIRENTE'].str.strip().str.upper().isin(termos_excluir)]
-                        df_lista = df_lista[~df_lista['NOME DO ADQUIRENTE'].str.strip().str.upper().str.startswith('R$')]
-                        df_lista = df_lista[df_lista['NOME DO ADQUIRENTE'].astype(str).str.replace(r'[^a-zA-Z]', '', regex=True).str.len() > 2]
+                    lista_chaves = sorted([str(c) for c in df_dash['Chave'].unique() if str(c).strip() != ""])
+                    cliente_auditoria = st.selectbox("Selecione o Contrato para auditar:", lista_chaves)
+                    
+                    if cliente_auditoria:
+                        # --- EXIBINDO O SALDO DEVEDOR NO TOPO ---
+                        saldo_atual = df_dash.loc[df_dash['Chave'] == cliente_auditoria, 'Saldo_Devedor'].values
+                        saldo_exibicao = saldo_atual[0] if len(saldo_atual) > 0 else 0.0
+                        st.warning(f"⚠️ Saldo Devedor Atualizado: **R$ {saldo_exibicao:,.2f}**".replace(',', '_').replace('.', ',').replace('_', '.'))
                         
-                        lista_formatada = []
-                        for _, row in df_lista.iterrows():
-                            nome = str(row.get('NOME DO ADQUIRENTE', '')).strip()
-                            unidade = str(row.get('DESCRIÇÃO RESUMIDA DA UNIDADE', '')).strip()
+                        col_ext1, col_ext2 = st.columns(2)
+                        
+                        with col_ext1:
+                            st.markdown("#### 📥 Pagamentos Identificados")
+                            df_pag_cli = df_pagamentos[df_pagamentos['Chave'] == cliente_auditoria].copy()
                             
-                            texto_combo = f"{nome}"
-                            if unidade: texto_combo += f" - {unidade}"
-                            if nome and texto_combo not in lista_formatada:
-                                lista_formatada.append(texto_combo)
+                            if not df_pag_cli.empty:
+                                soma_pags = df_pag_cli['Valor_Recebido'].sum()
+                                st.success(f"Soma dos Pagamentos: R$ {soma_pags:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                                 
-                        lista_clientes = sorted(lista_formatada)
-                    else:
-                        lista_clientes = ["Tabela não encontrada nas abas..."]
-                except Exception as e:
-                    lista_clientes = [f"Erro na conexão com o Sheets"]
-
-                cliente_combo = col1.selectbox("Selecione o Contrato:", lista_clientes)
-                motivo_ajuste = col2.text_input("Motivo (Ex: Doc, INCC):")
-                valor_digitado = col3.text_input("Valor (R$):", placeholder="Ex: 1750.10 ou 1750,10")
-                
-                import datetime
-                data_selecionada = col4.date_input("Data do Lançamento:", value=datetime.date.today(), format="DD/MM/YYYY")
-                btn_salvar_ajuste = st.form_submit_button("💾 Salvar Correção no Contrato")
-                
-                valor_ajuste = safe_to_float(valor_digitado)
-                
-                if btn_salvar_ajuste and cliente_combo and valor_ajuste > 0 and "Erro" not in cliente_combo:
-                    try:
-                        chave_banco = cliente_combo.strip()
-                        try:
-                            aba_ajustes = planilha_master.worksheet("Ajustes_Contratos")
-                        except:
-                            aba_ajustes = planilha_master.add_worksheet(title="Ajustes_Contratos", rows="100", cols="4")
-                            aba_ajustes.append_row(["Data_Registro", "Cliente", "Motivo", "Valor_Ajuste"])
-                            
-                        data_formatada = data_selecionada.strftime('%d/%m/%Y')
+                                try:
+                                    df_disp_pag = df_pag_cli[['Data_Pagamento', 'Valor_Recebido']].copy()
+                                    
+                                    # ORDENANDO AS DATAS CORRETAMENTE ANTES DE EXIBIR
+                                    df_disp_pag['Data_Real'] = pd.to_datetime(df_disp_pag['Data_Pagamento'], errors='coerce', format='mixed')
+                                    df_disp_pag = df_disp_pag.sort_values(by='Data_Real', ascending=True)
+                                    df_disp_pag['Data_Pagamento'] = df_disp_pag['Data_Real'].dt.strftime('%d/%m/%Y')
+                                    
+                                    # Mantendo apenas as colunas de visualização
+                                    df_disp_pag = df_disp_pag[['Data_Pagamento', 'Valor_Recebido']]
+                                except:
+                                    pass
+                                
+                                st.dataframe(
+                                    df_disp_pag, 
+                                    column_config={
+                                        "Data_Pagamento": st.column_config.TextColumn("Data do Pagamento"),
+                                        "Valor_Recebido": st.column_config.NumberColumn("Valor Pago", format="R$ %.2f")
+                                    },
+                                    hide_index=True, use_container_width=True
+                                )
+                            else:
+                                st.warning("Nenhum pagamento localizado para esta chave exata.")
                         
-                        # O PULO DO GATO: Enviando como um Float matemático puro, sem textos!
-                        aba_ajustes.append_row([data_formatada, chave_banco, motivo_ajuste, float(valor_ajuste)])
-                        
-                        st.success(f"Acréscimo de R$ {valor_ajuste:.2f} salvo com sucesso para {chave_banco}!")
-                        import time
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao salvar ajuste: {e}")
+                        with col_ext2:
+                            st.markdown("#### 🛠️ Ajustes/Documentação")
+                            try:
+                                df_aj_cli = df_aj[df_aj['Cliente'] == cliente_auditoria].copy()
+                                if not df_aj_cli.empty:
+                                    soma_ajs = df_aj_cli['Valor_Ajuste'].sum()
+                                    st.info(f"Soma dos Ajustes: R$ {soma_ajs:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                                    
+                                    # OMITINDO A DATA DO REGISTRO (Apenas Motivo e Valor)
+                                    df_disp_aj = df_aj_cli[['Motivo', 'Valor_Ajuste']].copy()
+                                    
+                                    st.dataframe(
+                                        df_disp_aj, 
+                                        column_config={
+                                            "Motivo": st.column_config.TextColumn("Motivo do Ajuste"),
+                                            "Valor_Ajuste": st.column_config.NumberColumn("Valor Adicional", format="R$ %.2f")
+                                        },
+                                        hide_index=True, use_container_width=True
+                                    )
+                                else:
+                                    st.info("Nenhum ajuste/documentação adicionado.")
+                            except:
+                                st.info("Sem base de ajustes.")
 
         st.divider()
 
@@ -921,6 +922,247 @@ else:
                                     st.info("Nenhum ajuste/documentação adicionado.")
                             except:
                                 st.info("Sem base de ajustes.")
+            except Exception as e:
+                st.error(f"Erro ao processar o Dashboard: {e}")
+
+    # ==========================================
+                # ABAS DE ANÁLISE, AUDITORIA E BOLETOS
+                # ==========================================
+                aba_tabela, aba_graficos, aba_extrato, aba_boletos = st.tabs([
+                    "🏢 Detalhamento (Investidores)", 
+                    "📈 Análise Gráfica",
+                    "🔍 Extrato do Investidor",
+                    "🧾 Emissão de Boletos"
+                ])
+                
+                with aba_tabela:
+                    st.subheader("🏛️ Resumo Tributário Acumulado (Baseado no Caixa Realizado)")
+                    pis_total = recebido_total * 0.0065
+                    cofins_total = recebido_total * 0.03
+                    csll_total = recebido_total * 0.0108
+                    ir_normal_total = recebido_total * 0.012
+                    
+                    df_pagamentos['Data_FMT'] = pd.to_datetime(df_pagamentos['Data_Pagamento'], errors='coerce', dayfirst=True)
+                    df_pagamentos['Mes_Ano'] = df_pagamentos['Data_FMT'].dt.to_period('M')
+                    receita_mensal = df_pagamentos.groupby('Mes_Ano')['Valor_Recebido'].sum().reset_index()
+                    
+                    ir_adicional_total = 0
+                    for _, row in receita_mensal.iterrows():
+                        base_pres = row['Valor_Recebido'] * 0.08
+                        if base_pres > 20000:
+                            ir_adicional_total += (base_pres - 20000) * 0.10
+
+                    t1, t2, t3, t4, t5 = st.columns(5)
+                    t1.metric("PIS (0,65%)", f"R$ {pis_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                    t2.metric("COFINS (3%)", f"R$ {cofins_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                    t3.metric("CSLL (1,08%)", f"R$ {csll_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                    t4.metric("IR (1,2%)", f"R$ {ir_normal_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                    t5.metric("IR Adicional", f"R$ {ir_adicional_total:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+
+                    st.divider()
+                    st.subheader("Situação Individualizada por Contrato")
+                    df_visual = df_dash[['Chave', 'VALOR DA UNIDADE', 'Valor_Ajuste', 'Valor_Atualizado', 'Total_Pago', 'Saldo_Devedor']].copy()
+                    
+                    df_visual['Progresso'] = df_visual.apply(
+                        lambda row: (row['Total_Pago'] / row['Valor_Atualizado'] * 100) if row['Valor_Atualizado'] > 0 else 0.0, 
+                        axis=1
+                    )
+                    df_visual['Progresso'] = df_visual['Progresso'].clip(upper=100)
+                    
+                    st.markdown("""<style>[data-testid="stDataFrame"] {zoom: 1.15;}</style>""", unsafe_allow_html=True)
+                    
+                    st.dataframe(
+                        df_visual,
+                        column_config={
+                            "Chave": st.column_config.TextColumn("Contrato (Investidor/Unidade)"),
+                            "VALOR DA UNIDADE": st.column_config.NumberColumn("Contrato Original", format="R$ %.2f"),
+                            "Valor_Ajuste": st.column_config.NumberColumn("+ Correções", format="R$ %.2f"),
+                            "Valor_Atualizado": st.column_config.NumberColumn("Total Atualizado", format="R$ %.2f"),
+                            "Total_Pago": st.column_config.NumberColumn("Pago", format="R$ %.2f"),
+                            "Saldo_Devedor": st.column_config.NumberColumn("Saldo Devedor", format="R$ %.2f"),
+                            "Progresso": st.column_config.ProgressColumn("Quitação", format="%.1f %%", min_value=0, max_value=100)
+                        },
+                        hide_index=True, use_container_width=True
+                    )
+                
+                with aba_graficos:
+                    st.subheader("Evolução do Caixa e Carga Tributária")
+                    if not df_pagamentos.empty:
+                        df_grafico = df_pagamentos.dropna(subset=['Data_FMT']).copy()
+                        df_grafico['Mes_Periodo'] = df_grafico['Data_FMT'].dt.to_period('M')
+                        df_mensal_graf = df_grafico.groupby('Mes_Periodo')['Valor_Recebido'].sum().reset_index()
+
+                        df_mensal_graf['Impostos_Comuns'] = df_mensal_graf['Valor_Recebido'] * (0.0065 + 0.03 + 0.0108 + 0.012)
+                        df_mensal_graf['Base_IR'] = df_mensal_graf['Valor_Recebido'] * 0.08
+                        df_mensal_graf['IR_Adicional'] = df_mensal_graf['Base_IR'].apply(lambda x: (x - 20000) * 0.10 if x > 20000 else 0)
+
+                        df_mensal_graf['Total_Tributos'] = df_mensal_graf['Impostos_Comuns'] + df_mensal_graf['IR_Adicional']
+                        df_mensal_graf['Caixa_Livre_Liquido'] = df_mensal_graf['Valor_Recebido'] - df_mensal_graf['Total_Tributos']
+                        df_mensal_graf['Mês/Ano'] = df_mensal_graf['Mes_Periodo'].dt.strftime('%m/%Y')
+
+                        st.markdown("### 📅 Desempenho Mensal")
+                        df_chart_m = df_mensal_graf[['Mês/Ano', 'Caixa_Livre_Liquido', 'Total_Tributos']].set_index('Mês/Ano')
+                        st.bar_chart(df_chart_m, color=["#1f77b4", "#d62728"], height=350) 
+                        
+                        st.divider()
+
+                        df_grafico['Ano'] = df_grafico['Data_FMT'].dt.year.astype(str)
+                        df_anual = df_grafico.groupby('Ano')['Valor_Recebido'].sum().reset_index()
+
+                        df_anual['Impostos_Comuns'] = df_anual['Valor_Recebido'] * (0.0065 + 0.03 + 0.0108 + 0.012)
+                        soma_ir_adicional_anual = df_mensal_graf.groupby(df_mensal_graf['Mes_Periodo'].dt.year)['IR_Adicional'].sum().reset_index()
+                        soma_ir_adicional_anual.columns = ['Ano', 'IR_Adicional']
+                        soma_ir_adicional_anual['Ano'] = soma_ir_adicional_anual['Ano'].astype(str)
+
+                        df_anual = pd.merge(df_anual, soma_ir_adicional_anual, on='Ano', how='left').fillna(0)
+                        df_anual['Total_Tributos'] = df_anual['Impostos_Comuns'] + df_anual['IR_Adicional']
+                        df_anual['Caixa_Livre_Liquido'] = df_anual['Valor_Recebido'] - df_anual['Total_Tributos']
+
+                        st.markdown("### 📆 Consolidado Anual")
+                        df_chart_a = df_anual[['Ano', 'Caixa_Livre_Liquido', 'Total_Tributos']].set_index('Ano')
+                        st.bar_chart(df_chart_a, color=["#2ca02c", "#d62728"], height=350)
+                    else:
+                        st.info("Ainda não há pagamentos registrados para gerar os gráficos.")
+
+                with aba_extrato:
+                    st.subheader("🔎 Auditoria: Extrato de Pagamentos e Ajustes")
+                    st.markdown("Selecione um contrato para verificar todas as parcelas e taxas que o sistema encontrou para ele.")
+                    
+                    lista_chaves = sorted([str(c) for c in df_dash['Chave'].unique() if str(c).strip() != ""])
+                    cliente_auditoria = st.selectbox("Selecione o Contrato para auditar:", lista_chaves)
+                    
+                    def formatar_data_br(data_str):
+                        if pd.isna(data_str) or str(data_str).strip() == "": return ""
+                        try:
+                            d = pd.to_datetime(str(data_str), errors='coerce', format='mixed')
+                            if pd.notna(d): return d.strftime('%d/%m/%Y')
+                            return str(data_str)
+                        except:
+                            return str(data_str)
+
+                    if cliente_auditoria:
+                        saldo_atual = df_dash.loc[df_dash['Chave'] == cliente_auditoria, 'Saldo_Devedor'].values
+                        saldo_exibicao = saldo_atual[0] if len(saldo_atual) > 0 else 0.0
+                        st.warning(f"⚠️ Saldo Devedor Atualizado: **R$ {saldo_exibicao:,.2f}**".replace(',', '_').replace('.', ',').replace('_', '.'))
+                        
+                        col_ext1, col_ext2 = st.columns(2)
+                        
+                        with col_ext1:
+                            st.markdown("#### 📥 Pagamentos Identificados")
+                            df_pag_cli = df_pagamentos[df_pagamentos['Chave'] == cliente_auditoria].copy()
+                            
+                            if not df_pag_cli.empty:
+                                soma_pags = df_pag_cli['Valor_Recebido'].sum()
+                                st.success(f"Soma dos Pagamentos: R$ {soma_pags:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                                
+                                try:
+                                    df_disp_pag = df_pag_cli[['Data_Pagamento', 'Valor_Recebido']].copy()
+                                    df_disp_pag['Data_Real'] = pd.to_datetime(df_disp_pag['Data_Pagamento'], errors='coerce', format='mixed')
+                                    df_disp_pag = df_disp_pag.sort_values(by='Data_Real', ascending=True)
+                                    df_disp_pag['Data_Pagamento'] = df_disp_pag['Data_Real'].dt.strftime('%d/%m/%Y')
+                                    df_disp_pag = df_disp_pag[['Data_Pagamento', 'Valor_Recebido']]
+                                except:
+                                    pass
+                                
+                                st.dataframe(
+                                    df_disp_pag, 
+                                    column_config={
+                                        "Data_Pagamento": st.column_config.TextColumn("Data do Pagamento"),
+                                        "Valor_Recebido": st.column_config.NumberColumn("Valor Pago", format="R$ %.2f")
+                                    },
+                                    hide_index=True, use_container_width=True
+                                )
+                            else:
+                                st.warning("Nenhum pagamento localizado para esta chave exata.")
+                        
+                        with col_ext2:
+                            st.markdown("#### 🛠️ Ajustes/Documentação")
+                            try:
+                                df_aj_cli = df_aj[df_aj['Cliente'] == cliente_auditoria].copy()
+                                if not df_aj_cli.empty:
+                                    soma_ajs = df_aj_cli['Valor_Ajuste'].sum()
+                                    st.info(f"Soma dos Ajustes: R$ {soma_ajs:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                                    
+                                    df_disp_aj = df_aj_cli[['Motivo', 'Valor_Ajuste']].copy()
+                                    
+                                    st.dataframe(
+                                        df_disp_aj, 
+                                        column_config={
+                                            "Motivo": st.column_config.TextColumn("Motivo do Ajuste"),
+                                            "Valor_Ajuste": st.column_config.NumberColumn("Valor Adicional", format="R$ %.2f")
+                                        },
+                                        hide_index=True, use_container_width=True
+                                    )
+                                else:
+                                    st.info("Nenhum ajuste/documentação adicionado.")
+                            except:
+                                st.info("Sem base de ajustes.")
+                                
+                # ==========================================
+                # NOVA ABA: EMISSÃO DE BOLETOS E WHATSAPP
+                # ==========================================
+                with aba_boletos:
+                    st.subheader("🧾 Painel de Emissão de Boletos - J&L Incorporadora")
+                    st.markdown("Edite o valor da parcela, defina a data de vencimento e preencha o WhatsApp. Selecione na primeira coluna os clientes que receberão a cobrança.")
+                    
+                    df_devedores = df_dash[df_dash['Saldo_Devedor'] > 0].copy()
+                    
+                    if not df_devedores.empty:
+                        df_emissao = pd.DataFrame()
+                        df_emissao['Emitir'] = False
+                        df_emissao['Nome_Cliente'] = df_devedores['Chave']
+                        df_emissao['Vencimento'] = (pd.Timestamp.now() + pd.Timedelta(days=5)).strftime('%d/%m/%Y')
+                        df_emissao['Valor_Parcela'] = 0.00
+                        df_emissao['Descricao'] = "Parcela do Empreendimento J&L Incorporadora"
+                        df_emissao['WhatsApp'] = "" 
+                        df_emissao['Saldo_Devedor'] = df_devedores['Saldo_Devedor']
+                        
+                        df_editado = st.data_editor(
+                            df_emissao,
+                            column_config={
+                                "Emitir": st.column_config.CheckboxColumn("Gerar Cobrança?", default=False),
+                                "Nome_Cliente": st.column_config.TextColumn("Cliente / Contrato", disabled=True),
+                                "Vencimento": st.column_config.TextColumn("Vencimento (DD/MM/AAAA)"),
+                                "Valor_Parcela": st.column_config.NumberColumn("Valor da Parcela (R$)", format="R$ %.2f", min_value=0.00),
+                                "Descricao": st.column_config.TextColumn("Descrição na Fatura"),
+                                "WhatsApp": st.column_config.TextColumn("WhatsApp (Ex: 31999999999)"),
+                                "Saldo_Devedor": st.column_config.NumberColumn("Saldo Devedor Restante", format="R$ %.2f", disabled=True)
+                            },
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        btn_emitir = st.button("🚀 Processar Boletos Selecionados", type="primary")
+                            
+                        if btn_emitir:
+                            clientes_selecionados = df_editado[df_editado['Emitir'] == True]
+                            
+                            if clientes_selecionados.empty:
+                                st.warning("Selecione pelo menos um cliente marcando a caixa de seleção na primeira coluna da tabela.")
+                            else:
+                                st.success(f"Preparando emissão para {len(clientes_selecionados)} cliente(s)...")
+                                
+                                for idx, row in clientes_selecionados.iterrows():
+                                    nome_completo = row['Nome_Cliente'].split('-')[0].strip()
+                                    zap = str(row['WhatsApp']).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                                    valor = row['Valor_Parcela']
+                                    vencimento = row['Vencimento']
+                                    
+                                    # O código do Inter SDK entrará exatamente nesta linha nas próximas etapas.
+                                    # Por enquanto, geramos um link simulado para você validar o fluxo do WhatsApp.
+                                    link_boleto_gerado = "https://bancointer.com.br/boleto/exemplo_jl_123" 
+                                    
+                                    if len(zap) >= 10:
+                                        texto_msg = f"Olá {nome_completo}, segue o link do seu boleto com vencimento em {vencimento} no valor de R$ {valor:.2f}: {link_boleto_gerado}".replace(' ', '%20')
+                                        link_wa = f"https://wa.me/55{zap}?text={texto_msg}"
+                                        
+                                        st.markdown(f"✅ Fatura de **{nome_completo}** gerada! ➔ [📲 Cique aqui para enviar via WhatsApp]({link_wa})")
+                                    else:
+                                        st.markdown(f"✅ Fatura de **{nome_completo}** gerada! *(Telefone em branco ou inválido)* ➔ Link do Boleto: {link_boleto_gerado}")
+                    else:
+                        st.success("🎉 Todos os contratos constam como quitados. Não há boletos pendentes.")
+                        
             except Exception as e:
                 st.error(f"Erro ao processar o Dashboard: {e}")
                                 
