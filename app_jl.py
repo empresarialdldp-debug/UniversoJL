@@ -593,6 +593,7 @@ else:
                 st.caption("A base central está vazia.")
         except Exception as e:
             st.error(f"Erro ao processar tela contábil: {e}")
+            
    # --- TELA 4: DASHBOARD EXECUTIVO ---
     elif modulo == "📊 Dashboard Executivo":
         st.title("📊 Painel de Recebíveis - Wilson Moreira")
@@ -863,7 +864,7 @@ else:
                         saldo_exibicao = saldo_atual[0] if len(saldo_atual) > 0 else 0.0
                         st.warning(f"⚠️ Saldo Devedor Atualizado: **R$ {saldo_exibicao:,.2f}**".replace(',', '_').replace('.', ',').replace('_', '.'))
                         
-                        col_ext1, col_ext2 = st.columns(2)
+                        col_ext1, col_btn2 = st.columns(2)
                         
                         with col_ext1:
                             st.markdown("#### 📥 Pagamentos Identificados")
@@ -1019,7 +1020,6 @@ else:
                                                     from inter_sdk_python.billing.models.Fine import Fine
                                                     from inter_sdk_python.billing.models.Mora import Mora
                                                     
-                                                    # Usando .taxa no lugar de .valor para percentuais!
                                                     multa = Fine()
                                                     multa.codigo_multa = multa.codigoMulta = "PERCENTUAL"
                                                     multa.taxa = Decimal("2.00")
@@ -1098,7 +1098,8 @@ else:
                                                 st.error(f"❌ Falha ao emitir {nome_completo}: {msg}")
                                                 
                                     finally:
-                                        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
+                                        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
+                                            os.remove(caminho_pfx_temp)
 
                         # EXIBIÇÃO FINAL
                         if st.session_state.get("boletos_processados"):
@@ -1120,9 +1121,6 @@ else:
                                         st.markdown(f"**[📲 Enviar Mensagem Completa no WhatsApp]({bol['link_wa']})**")
                                     else:
                                         st.caption("Sem telefone cadastrado.")
-                                                
-                                  
-                        
             except Exception as e:
                 st.error(f"Erro ao processar o Dashboard: {e}")
                                 
