@@ -912,24 +912,25 @@ else:
                                 st.caption("Não foi possível carregar o histórico de ajustes.")
 
                 # ==========================================
-                # ABA DE BOLETOS 
+                # ABA DE BOLETOS (RESTAURADA E CORRIGIDA)
                 # ==========================================
                 with aba_boletos:
                     st.subheader("🧾 Emissão Lote de Boletos - Banco Inter")
                     st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
                     
-                    # ⚠️ IMPORTANTE: Se a tabela com os nomes, CPF, Vencimento etc for outra (como df_devedores), mude df_dash para df_devedores abaixo!
-                    try:
-                        df_boletos_tela = df_dash.copy()
-                    except NameError:
-                        st.error("Base de dados principal não encontrada.")
-                        st.stop()
+                    # 1. RESTAURANDO A FILTRAGEM ORIGINAL: 
+                    # Selecionamos apenas as colunas que importam, ignorando colunas vazias/fantasmas da planilha
+                    colunas_alvo = ['Nome_Cliente', 'CPF_CNPJ', 'WhatsApp', 'CEP', 'Numero', 'Complemento', 'Valor_Parcela', 'Vencimento', 'Saldo_Devedor']
+                    colunas_reais = [col for col in colunas_alvo if col in df_dash.columns]
                     
-                    if 'Emitir' not in df_boletos_tela.columns:
-                        df_boletos_tela.insert(0, 'Emitir', False)
+                    df_devedores = df_dash[colunas_reais].copy()
+                    
+                    if 'Emitir' not in df_devedores.columns:
+                        df_devedores.insert(0, 'Emitir', False)
                         
+                    # 2. TABELA VISUAL (Agora protegida contra colunas duplicadas/vazias)
                     df_editado = st.data_editor(
-                        df_boletos_tela,
+                        df_devedores,
                         column_config={"Emitir": st.column_config.CheckboxColumn("Gerar?", default=False)},
                         hide_index=True,
                         use_container_width=True
@@ -958,7 +959,7 @@ else:
                                 import math
                                 
                                 # ==========================================
-                                # 1. CONFIGURAÇÃO GOOGLE DRIVE (LINK PÚBLICO)
+                                # CONFIGURAÇÃO GOOGLE DRIVE (LINK PÚBLICO)
                                 # ==========================================
                                 PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
                                 drive_service = None
@@ -972,7 +973,7 @@ else:
                                     st.warning(f"Drive Desconectado (O PDF não será salvo na nuvem). Erro: {e}")
                                 
                                 # ==========================================
-                                # 2. CONFIGURAÇÃO BANCO INTER
+                                # CONFIGURAÇÃO BANCO INTER
                                 # ==========================================
                                 caminho_pfx_temp = None
                                 try:
@@ -996,7 +997,7 @@ else:
                                     sdk.set_account(creds_inter["conta_corrente"].replace("-",""))
                                     
                                     # ==========================================
-                                    # 3. MOTOR DE EMISSÃO E LINKS
+                                    # MOTOR DE EMISSÃO E LINKS
                                     # ==========================================
                                     for idx, row in clientes_selecionados.iterrows():
                                         nome_completo = str(row.get('Nome_Cliente', 'Cliente')).split('-')[0].strip()[:100]
@@ -1048,16 +1049,14 @@ else:
                                             boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
                                             boleto.pagador = boleto.payer = pagador
                                             
-                                            # ==========================================
-                                            # REGRAS DE ATRASO (MULTA E MORA)
-                                            # ==========================================
+                                            # REGRAS DE ATRASO
                                             boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
                                             try:
                                                 from inter_sdk_python.billing.models.Fine import Fine
                                                 from inter_sdk_python.billing.models.Mora import Mora
                                                 multa = Fine(); multa.codigo_multa = multa.codigoMulta = "PERCENTUAL"; multa.taxa = Decimal("2.00"); boleto.multa = boleto.fine = multa
                                                 mora = Mora(); mora.codigo_mora = mora.codigoMora = "TAXA_MENSAL"; mora.taxa = Decimal("1.00"); boleto.mora = mora
-                                            except Exception as err_regra:
+                                            except Exception:
                                                 pass
 
                                             # Emissão
