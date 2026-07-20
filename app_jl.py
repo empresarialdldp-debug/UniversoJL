@@ -897,51 +897,37 @@ else:
                         with col_ext2:
                             st.markdown("#### ⚙️ Ajustes e Correções")
                             try:
-                                if 'df_ajustes' in locals() or 'df_ajustes' in globals():
-                                    df_ajuste_cli = df_ajustes[df_ajustes['Chave'] == cliente_auditoria].copy()
-                                    if not df_ajuste_cli.empty:
-                                        soma_ajustes = df_ajuste_cli['Valor_Ajuste'].sum()
-                                        st.info(f"Soma das Correções: R$ {soma_ajustes:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                                        df_disp_ajuste = df_ajuste_cli[['Data_Ajuste', 'Valor_Ajuste', 'Motivo']].copy()
-                                        st.dataframe(df_disp_ajuste, hide_index=True, use_container_width=True)
-                                    else:
-                                        st.info("Nenhuma correção lançada para este contrato.")
+                                aba_ajustes = planilha_master.worksheet("Ajustes_Contratos")
+                                df_ajustes_audit = pd.DataFrame(aba_ajustes.get_all_records())
+                                df_ajuste_cli = df_ajustes_audit[df_ajustes_audit['Cliente'] == cliente_auditoria].copy()
+                                if not df_ajuste_cli.empty:
+                                    df_ajuste_cli['Valor_Ajuste'] = df_ajuste_cli['Valor_Ajuste'].apply(safe_to_float)
+                                    soma_ajustes = df_ajuste_cli['Valor_Ajuste'].sum()
+                                    st.info(f"Soma das Correções: R$ {soma_ajustes:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
+                                    df_disp_ajuste = df_ajuste_cli[['Data_Registro', 'Valor_Ajuste', 'Motivo']].copy()
+                                    st.dataframe(df_disp_ajuste, hide_index=True, use_container_width=True)
                                 else:
-                                    st.caption("A base de dados de correções não está carregada.")
-                            except:
-                                st.caption("Não foi possível carregar o histórico de ajustes.")
+                                    st.info("Nenhuma correção lançada para este contrato.")
+                            except Exception as e:
+                                st.caption(f"Sem histórico de ajustes na base. {e}")
 
                 # ==========================================
-                # ABA DE BOLETOS (LENDO DIRETAMENTE A ABA CADASTRO_CLIENTES)
+                # ABA DE BOLETOS
                 # ==========================================
                 with aba_boletos:
                     st.subheader("🧾 Emissão Lote de Boletos - Banco Inter")
                     st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
                     
                     try:
-                        # 1. PUXANDO EXATAMENTE DA ABA 'Cadastro_Clientes'
+                        # 1. PUXA OS DADOS REAIS DO CLIENTE
                         aba_clientes = planilha_master.worksheet("Cadastro_Clientes")
-                        df_cadastro = pd.DataFrame(aba_clientes.get_all_records())
+                        df_boletos_tela = pd.DataFrame(aba_clientes.get_all_records())
                         
-                        # Limpa colunas vazias para não bugar a tabela na tela
-                        colunas_validas = [col for col in df_cadastro.columns if str(col).strip() != "" and not str(col).startswith("Unnamed")]
-                        df_boletos_tela = df_cadastro[colunas_validas].copy()
-                        
-                        # Busca o Saldo_Devedor calculado no df_dash e insere na tabela de boletos (se já não existir)
-                        if 'Saldo_Devedor' not in df_boletos_tela.columns and 'Nome_Cliente' in df_boletos_tela.columns:
-                            saldos_dict = dict(zip(df_dash['Chave'], df_dash['Saldo_Devedor']))
-                            def buscar_saldo(nome):
-                                for chave, saldo in saldos_dict.items():
-                                    if str(nome).strip().upper() in str(chave).strip().upper():
-                                        return saldo
-                                return 0.0
-                            df_boletos_tela['Saldo_Devedor'] = df_boletos_tela['Nome_Cliente'].apply(buscar_saldo)
-                            
-                        # 2. ADICIONA A CAIXINHA DE SELEÇÃO
+                        # 2. ADICIONA A COLUNA DE CHECKBOX
                         if 'Emitir' not in df_boletos_tela.columns:
                             df_boletos_tela.insert(0, 'Emitir', False)
                             
-                        # 3. DESENHA A TABELA NA TELA
+                        # 3. EXIBE A TABELA NA TELA
                         df_editado = st.data_editor(
                             df_boletos_tela,
                             column_config={"Emitir": st.column_config.CheckboxColumn("Gerar?", default=False)},
@@ -972,7 +958,7 @@ else:
                                     import math
                                     
                                     # ==========================================
-                                    # INTEGRAÇÃO GOOGLE DRIVE (CORREÇÃO DO PEM)
+                                    # INTEGRAÇÃO GOOGLE DRIVE
                                     # ==========================================
                                     PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
                                     drive_service = None
@@ -981,7 +967,7 @@ else:
                                         from googleapiclient.discovery import build
                                         from googleapiclient.http import MediaIoBaseUpload
                                         
-                                        # Conserta a quebra de linha da chave privada no Streamlit Cloud
+                                        # Correção crucial para o certificado PEM não dar erro no Streamlit Cloud
                                         creds_dict = dict(st.secrets["gcp_service_account"])
                                         if "private_key" in creds_dict:
                                             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
@@ -1025,15 +1011,15 @@ else:
                                         sdk.set_account(creds_inter["conta_corrente"].replace("-",""))
                                         
                                         # ==========================================
-                                        # ROTINA DE EMISSÃO (BUSCA INTELIGENTE DE COLUNAS)
+                                        # ROTINA DE EMISSÃO
                                         # ==========================================
                                         for idx, row in clientes_selecionados.iterrows():
-                                            # Procura as colunas usando os nomes mais comuns
-                                            val_nome = row.get('Nome_Cliente', row.get('Nome', row.get('Cliente', row.get('NOME DO ADQUIRENTE', ''))))
+                                            # Busca tolerante pelas colunas da planilha (aceita nomes variados)
+                                            val_nome = row.get('Nome_Cliente', row.get('Nome', row.get('Cliente', '')))
                                             val_cpf = row.get('CPF_CNPJ', row.get('CPF', row.get('CNPJ', '')))
                                             val_zap = row.get('WhatsApp', row.get('Celular', row.get('Telefone', '')))
                                             val_cep = row.get('CEP', row.get('Cep', '30000000'))
-                                            val_valor = row.get('Valor_Parcela', row.get('Valor', row.get('Parcela', row.get('VALOR DA PARCELA', 0.0))))
+                                            val_valor = row.get('Valor_Parcela', row.get('Valor', row.get('Parcela', 0.0)))
                                             val_venc = row.get('Vencimento', row.get('Data', dt.datetime.today().strftime('%d/%m/%Y')))
                                             val_num = row.get('Numero', row.get('Número', '0'))
                                             
@@ -1043,23 +1029,27 @@ else:
                                             cep_limpo = re.sub(r'\D', '', str(val_cep))
                                             numero = str(val_num).strip() if str(val_num).strip() != "" else "0"
                                             
-                                            try:
-                                                valor = float(val_valor)
-                                            except:
-                                                valor = 0.0
+                                            try: valor = float(str(val_valor).replace(',', '.'))
+                                            except: valor = 0.0
                                                 
-                                            saldo_devedor = float(row.get('Saldo_Devedor', 0))
+                                            # Busca o saldo devedor na memória (df_dash) cruzando pelo nome
+                                            saldo_devedor = 0.0
+                                            try:
+                                                match = df_dash[df_dash['Chave'].str.contains(nome_completo, case=False, na=False)]
+                                                if not match.empty: saldo_devedor = float(match['Saldo_Devedor'].values[0])
+                                            except: pass
+                                            
                                             vencimento = str(val_venc)
                                             
-                                            # TRAVA DE SEGURANÇA: Impede o envio de "Cliente Genérico" ou "Valor Zerado" para o Inter
+                                            # TRAVAS DE PROTEÇÃO CONTRA PLANILHAS ERRADAS
                                             if not nome_completo or nome_completo.lower() == "nan":
-                                                st.error(f"❌ Linha ignorada: Nome do cliente não encontrado. Verifique o cabeçalho de Nome na planilha.")
+                                                st.error(f"❌ Linha {idx}: Nome do cliente não encontrado.")
                                                 continue
                                             if len(cpf_cnpj_limpo) < 11:
-                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido ou ausente na planilha.")
+                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido na planilha.")
                                                 continue
                                             if valor <= 0:
-                                                st.error(f"❌ {nome_completo}: O valor do boleto está zerado (R$ 0.0). Verifique a coluna de Valor na planilha.")
+                                                st.error(f"❌ {nome_completo}: O valor da parcela está R$ 0.0.")
                                                 continue
                                             
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
@@ -1107,6 +1097,7 @@ else:
                                                 boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
                                                 boleto.pagador = boleto.payer = pagador
                                                 
+                                                # MULTA E MORA
                                                 boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
                                                 try:
                                                     from inter_sdk_python.billing.models.Fine import Fine
@@ -1168,9 +1159,9 @@ else:
                                                         })
                                                         st.success(f"🎉 PDF de {nome_completo} gerado com sucesso!")
                                                     except Exception as erro_pdf:
-                                                        st.warning(f"⚠️ Boleto gerado com sucesso, mas ocorreu erro no Drive/PDF: {erro_pdf}")
+                                                        st.warning(f"⚠️ Boleto gerado, mas ocorreu erro no Drive/PDF: {erro_pdf}")
                                                 else:
-                                                    st.error(f"❌ O Banco aceitou a requisição, mas não retornou um código de rastreio para {nome_completo}.")
+                                                    st.error(f"❌ O Banco aceitou a requisição, mas não retornou um código de rastreio.")
                                             
                                             except Exception as erro_emissao:
                                                 msg = str(erro_emissao)
@@ -1181,32 +1172,32 @@ else:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
 
-                    # EXIBIÇÃO FINAL DOS BOLETOS PARA DOWNLOAD E ZAP
-                    if st.session_state.get("boletos_processados"):
-                        st.divider()
-                        st.markdown("### 🗂️ Boletos Prontos para Envio")
-                        
-                        for i, bol in enumerate(st.session_state.boletos_processados):
-                            colA, colB, colC = st.columns([3, 2, 2])
-                            colA.markdown(f"**{bol['nome']}**")
+                        # EXIBIÇÃO FINAL DOS BOLETOS PARA DOWNLOAD E ZAP
+                        if st.session_state.get("boletos_processados"):
+                            st.divider()
+                            st.markdown("### 🗂️ Boletos Prontos para Envio")
                             
-                            with colB:
-                                if bol['link_drive']:
-                                    st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
-                                else:
-                                    st.download_button(
-                                        label="📥 Baixar PDF Original",
-                                        data=bol['arquivo'],
-                                        file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
-                                        mime="application/pdf",
-                                        key=f"dl_{i}"
-                                    )
-                            
-                            with colC:
-                                if bol['link_wa']:
-                                    st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
-                                else:
-                                    st.caption("Sem telefone cadastrado.")
+                            for i, bol in enumerate(st.session_state.boletos_processados):
+                                colA, colB, colC = st.columns([3, 2, 2])
+                                colA.markdown(f"**{bol['nome']}**")
+                                
+                                with colB:
+                                    if bol['link_drive']:
+                                        st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
+                                    else:
+                                        st.download_button(
+                                            label="📥 Baixar PDF Original",
+                                            data=bol['arquivo'],
+                                            file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
+                                            mime="application/pdf",
+                                            key=f"dl_{i}"
+                                        )
+                                
+                                with colC:
+                                    if bol['link_wa']:
+                                        st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
+                                    else:
+                                        st.caption("Sem telefone cadastrado.")
                     except Exception as e:
                         st.error(f"Erro ao carregar a aba 'Cadastro_Clientes': {e}")
             except Exception as e:
