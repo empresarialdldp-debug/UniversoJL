@@ -1035,12 +1035,16 @@ else:
                                     import datetime as dt
                                     from decimal import Decimal
                                     import re
+                                    import requests
                                     
                                     caminho_pfx_temp = None
                                     try:
+                                        # USANDO O NOME EXATO DO SEU SECRETS
+                                        creds_inter = st.secrets["inter_api"]
+                                        
                                         # Cria o certificado temporário na nuvem
                                         with tempfile.NamedTemporaryFile(delete=False, suffix='.pfx') as tmp_pfx:
-                                            tmp_pfx.write(base64.b64decode(st.secrets["inter"]["pfx_base64"]))
+                                            tmp_pfx.write(base64.b64decode(creds_inter["pfx_base64"]))
                                             caminho_pfx_temp = tmp_pfx.name
                                             
                                         # Importações a partir do ZIP já descompactado no topo do seu código
@@ -1058,12 +1062,12 @@ else:
                                         # Iniciando a conexão com o PFX físico temporário
                                         sdk = InterSdk(
                                             "PRODUCTION",
-                                            st.secrets["inter"]["client_id"],
-                                            st.secrets["inter"]["client_secret"],
+                                            creds_inter["client_id"],
+                                            creds_inter["client_secret"],
                                             caminho_pfx_temp,
-                                            st.secrets["inter"]["cert_password"]
+                                            creds_inter["pfx_senha"]
                                         )
-                                        sdk.set_account(st.secrets["inter"]["conta_corrente"])
+                                        sdk.set_account(creds_inter["conta_corrente"].replace("-",""))
                                         
                                         # 2. MOTOR DE EMISSÃO
                                         for idx, row in clientes_selecionados.iterrows():
