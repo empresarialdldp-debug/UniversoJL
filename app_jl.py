@@ -1162,8 +1162,9 @@ else:
                                         st.markdown(f"**[📲 Enviar Mensagem Completa no WhatsApp]({bol['link_wa']})**")
                                     else:
                                         st.caption("Sem telefone cadastrado.")
-                    except Exception as e:
-                        st.error(f"Erro na aba de Boletos: {e}")
+            except Exception as e:
+                 st.error(f"Erro na aba de Boletos: {e}")
+                        
 
     
     # --- TELA 5: FATURAMENTO (BOLETOS) ---
