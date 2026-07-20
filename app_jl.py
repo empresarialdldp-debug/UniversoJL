@@ -1120,7 +1120,12 @@ else:
 
                                                 # Boleto
                                                 boleto = BillingIssueRequest()
+                                                
+                                                # SeuNúmero travado em até 15 caracteres
+                                                segundos = str(int(dt.datetime.now().timestamp()))[-6:]
+                                                controle = f"JL{idx}{segundos}S"[:15]
                                                 boleto.seu_numero = boleto.seuNumero = boleto.your_number = boleto.yourNumber = controle
+                                                
                                                 val = Decimal(str(round(valor, 2)))
                                                 boleto.valor_nominal = boleto.valorNominal = boleto.nominal_value = boleto.nominalValue = val
                                                 boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
@@ -1130,18 +1135,19 @@ else:
                                                 # Emissão Direta
                                                 res = sdk.billing().issue_billing(boleto)
                                                 
-                                                # Tenta ler como dicionário ou como objeto
+                                                # BLINDAGEM MÁXIMA: Lê o código no formato Antigo (nossoNumero) ou Novo (request_code)
                                                 n_num = None
                                                 if isinstance(res, dict):
-                                                    n_num = res.get('nossoNumero') or res.get('nosso_numero')
+                                                    n_num = res.get('nossoNumero') or res.get('nosso_numero') or res.get('request_code') or res.get('requestCode')
                                                 else:
-                                                    n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None)
+                                                    n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None) or getattr(res, 'request_code', None)
                                                 
                                                 if n_num:
-                                                    st.info(f"⏳ Aguardando renderização do boleto de {nome_completo} (NN: {n_num})...")
+                                                    st.info(f"⏳ Boleto aceito pelo banco! Renderizando o PDF (Cód: {str(n_num)[:8]}...).")
                                                     import time
-                                                    time.sleep(4)
+                                                    time.sleep(4)  # Aguarda o banco gerar o documento físico
                                                     
+                                                    # Recuperação do PDF
                                                     pdf_path = os.path.join(tempfile.gettempdir(), f"{controle}.pdf")
                                                     try:
                                                         sdk.billing().retrieve_billing_pdf(str(n_num), file=pdf_path)
@@ -1156,27 +1162,22 @@ else:
                                                             "arquivo": pdf_bytes,
                                                             "link_wa": link_wa
                                                         })
-                                                        st.success(f"🎉 PDF de {nome_completo} recebido!")
+                                                        st.success(f"🎉 PDF de {nome_completo} recebido e pronto para baixar!")
                                                     except Exception as erro_pdf:
-                                                        st.warning(f"⚠️ Boleto gerado, mas erro ao baixar PDF: {erro_pdf}")
+                                                        st.warning(f"⚠️ Boleto gerado com sucesso, mas o Inter demorou a liberar o PDF: {erro_pdf}")
                                                 else:
-                                                    # RAIO-X DA RESPOSTA DO BANCO
-                                                    st.error(f"❌ Banco não retornou Nosso Número para {nome_completo}. Veja a resposta crua do banco abaixo:")
-                                                    try:
-                                                        st.json(res if isinstance(res, dict) else res.__dict__)
-                                                    except:
-                                                        st.write(dir(res))
+                                                    st.error(f"❌ O Banco aceitou a requisição, mas não retornou um código de rastreio para {nome_completo}.")
                                             
                                             except Exception as erro_emissao:
                                                 msg = str(erro_emissao)
                                                 if hasattr(erro_emissao, 'error') and erro_emissao.error: msg = erro_emissao.error.detail
-                                                st.error(f"❌ Falha {nome_completo}: {msg}")
+                                                st.error(f"❌ Falha ao emitir {nome_completo}: {msg}")
                                                 
                                     finally:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
 
-                        # EXIBIÇÃO FINAL
+                        # EXIBIÇÃO FINAL DOS BOLETOS PARA DOWNLOAD
                         if st.session_state.get("boletos_processados"):
                             st.divider()
                             st.markdown("### 🗂️ Boletos Prontos para Envio")
@@ -1187,7 +1188,7 @@ else:
                                 
                                 with colB:
                                     st.download_button(
-                                        label="📥 Baixar PDF Real",
+                                        label="📥 Baixar PDF Original",
                                         data=bol['arquivo'],
                                         file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
                                         mime="application/pdf",
@@ -1196,7 +1197,7 @@ else:
                                 
                                 with colC:
                                     if bol['link_wa']:
-                                        st.markdown(f"[📲 Abrir WhatsApp]({bol['link_wa']})")
+                                        st.markdown(f"[📲 Abrir WhatsApp do Cliente]({bol['link_wa']})")
                                     else:
                                         st.caption("Sem telefone cadastrado.")
                         
