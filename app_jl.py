@@ -919,7 +919,7 @@ else:
                     st.markdown("Edite os dados na tabela abaixo. Clique em **Salvar Alterações** e depois processe os boletos.")
                     
                     try:
-                        # 1. PUXA OS DADOS REAIS DO CLIENTE
+                        # 1. PUXA OS DADOS REAIS DO CLIENTE (CORREÇÃO DEFINITIVA DAS COLUNAS VAZIAS)
                         aba_clientes = planilha_master.worksheet("Cadastro_Clientes")
                         dados_aba = aba_clientes.get_all_values()
                         
@@ -932,7 +932,7 @@ else:
                         colunas_validas = [col for col in df_boletos_tela.columns if str(col).strip() != "" and not str(col).startswith("Unnamed")]
                         df_boletos_tela = df_boletos_tela[colunas_validas].copy()
                         
-                        # 2. INJETA "VENCIMENTO" E "SALDO_DEVEDOR" PARA SEREM EDITÁVEIS
+                        # 2. INJETA "VENCIMENTO" E "SALDO_DEVEDOR" PARA SEREM EDITÁVEIS NA TELA
                         import datetime as dt
                         data_padrao = (dt.datetime.today() + dt.timedelta(days=5)).strftime('%d/%m/%Y')
                         
@@ -970,7 +970,7 @@ else:
                         col_btn1, col_btn2 = st.columns([2, 2])
                         
                         # ==========================================
-                        # BOTÃO DE SALVAR (RESTAURADO)
+                        # BOTÃO DE SALVAR
                         # ==========================================
                         with col_btn1:
                             if st.button("💾 Salvar Alterações na Planilha", use_container_width=True):
@@ -983,6 +983,9 @@ else:
                                 except Exception as e:
                                     st.error(f"Erro ao salvar: {e}")
 
+                        # ==========================================
+                        # BOTÃO DE EMITIR BOLETOS
+                        # ==========================================
                         with col_btn2:
                             if st.button("🚀 Processar Boletos Selecionados", type="primary", use_container_width=True):
                                 clientes_selecionados = df_editado[df_editado['Emitir'] == True]
@@ -1002,9 +1005,7 @@ else:
                                     import io
                                     import math
                                     
-                                    # ==========================================
                                     # 1. GOOGLE DRIVE
-                                    # ==========================================
                                     PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
                                     drive_service = None
                                     try:
@@ -1024,9 +1025,7 @@ else:
                                     except Exception as e:
                                         st.warning(f"Drive Desconectado. PDF só na memória. Erro: {e}")
                                         
-                                    # ==========================================
                                     # 2. BANCO INTER
-                                    # ==========================================
                                     caminho_pfx_temp = None
                                     try:
                                         creds_inter = st.secrets["inter_api"]
@@ -1056,9 +1055,7 @@ else:
                                             try: return float(v)
                                             except: return 0.0
 
-                                        # ==========================================
                                         # 3. MOTOR DE EMISSÃO
-                                        # ==========================================
                                         for idx, row in clientes_selecionados.iterrows():
                                             val_nome = row.get('Nome_Base', '')
                                             val_cpf = row.get('CPF_CNPJ', '')
@@ -1090,7 +1087,7 @@ else:
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
                                             controle = f"JL{idx}{segundos}"[:15]
                                             
-                                            # BYPASS DE BLOQUEIO DE SERVIDOR: USANDO BRASILAPI
+                                            # BYPASS DE BLOQUEIO DO VIACEP
                                             rua_encontrada, bairro_encontrado, cidade_encontrada, uf_encontrada = "Logradouro", "Bairro", "Cidade", "MG"
                                             if len(cep_limpo) == 8:
                                                 try:
@@ -1200,43 +1197,7 @@ else:
                                                 else:
                                                     st.error(f"❌ O Banco aceitou a requisição, mas não retornou um rastreio.")
                                             
-                                            # EXTRATOR DE ERROS DETALHADO DO BANCO INTER
-                                            except Exception as erro_emissao:
-                                                erro_str = str(erro_emissao)
-                                                if hasattr(erro_emissao, 'error') and erro_emissao.error:
-                                                    erro_str = getattr(erro_emissao.error, 'detail', str(erro_emissao.error))
-                                                st.error(f"❌ Falha ao emitir {nome_completo}. Motivo do Banco: {erro_str}")
-                                                
-                                    finally:
-                                        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
-                                            os.remove(caminho_pfx_temp)
-
-                        if st.session_state.get("boletos_processados"):
-                            st.divider()
-                            st.markdown("### 🗂️ Boletos Prontos para Envio")
-                            
-                            for i, bol in enumerate(st.session_state.boletos_processados):
-                                colA, colB, colC = st.columns([3, 2, 2])
-                                colA.markdown(f"**{bol['nome']}**")
-                                
-                                with colB:
-                                    if bol['link_drive']:
-                                        st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
-                                    else:
-                                        st.download_button(
-                                            label="📥 Baixar PDF Original",
-                                            data=bol['arquivo'],
-                                            file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
-                                            mime="application/pdf",
-                                            key=f"dl_{i}"
-                                        )
-                                
-                                with colC:
-                                    if bol['link_wa']:
-                                        st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
-                                    else:
-                                        st.caption("Sem telefone cadastrado.")
-                    # EXTRATOR DE ERROS DETALHADO DO BANCO INTER
+                                            # EXTRATOR DE ERROS DETALHADO DO BANCO INTER (SEU LOG)
                                             except Exception as erro_emissao:
                                                 st.error(f"❌ Falha ao emitir {nome_completo}.")
                                                 
@@ -1268,7 +1229,38 @@ else:
                                                             st.json(erro_emissao.__dict__)
                                                     except:
                                                         st.write(str(erro_emissao))
+                                                        
+                                    finally:
+                                        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
+                                            os.remove(caminho_pfx_temp)
 
+                        if st.session_state.get("boletos_processados"):
+                            st.divider()
+                            st.markdown("### 🗂️ Boletos Prontos para Envio")
+                            
+                            for i, bol in enumerate(st.session_state.boletos_processados):
+                                colA, colB, colC = st.columns([3, 2, 2])
+                                colA.markdown(f"**{bol['nome']}**")
+                                
+                                with colB:
+                                    if bol['link_drive']:
+                                        st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
+                                    else:
+                                        st.download_button(
+                                            label="📥 Baixar PDF Original",
+                                            data=bol['arquivo'],
+                                            file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
+                                            mime="application/pdf",
+                                            key=f"dl_{i}"
+                                        )
+                                
+                                with colC:
+                                    if bol['link_wa']:
+                                        st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
+                                    else:
+                                        st.caption("Sem telefone cadastrado.")
+                    except Exception as e:
+                        st.error(f"Erro ao carregar a aba 'Cadastro_Clientes': {e}")
             except Exception as e:
                 st.error(f"Erro ao processar o Dashboard: {e}")
                         
