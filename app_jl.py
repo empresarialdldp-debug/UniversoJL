@@ -935,23 +935,24 @@ else:
                             aba_cadastro = planilha_master.add_worksheet(title="Cadastro_Clientes", rows="100", cols="8")
                             cabecalho = ["Nome_Base", "CPF_CNPJ", "CEP", "Numero", "Complemento", "WhatsApp", "Valor_Parcela"]
                             
+                            # USANDO MATEMÁTICA PURA (SEM ASPAS) PARA O GOOGLE NÃO MULTIPLICAR OS VALORES
                             dados_iniciais = [
-                                ["EDSON FERREIRA TOLEDO", "534.142.506-59", "32606-016", "243", "", "(31) 9977-77088", "8972.22"],
-                                ["ARLEY FRANÇA LEITE", "938.501.406-44", "31330-020", "446", "Apto 504", "(31) 9877-66564", "6078.53"],
-                                ["MARCELO MAIA TEODORO", "065.584.286-10", "31330-040", "274", "Apto 401", "(31) 99632-6633", "2333.33"],
-                                ["THALIS RODRIGUES DE PAULA", "116.999.526-80", "31110-130", "815", "Apto 101", "(31) 98573-1001", "1166.67"],
-                                ["RAMON DE SOUZA MACHADO", "126.499.496-60", "30493-165", "158", "Apto 1002", "(31) 98422-7841", "1166.67"],
-                                ["HENRIQUE SETTE GARCIA DE AGUIAR", "066.457.586-26", "31330-180", "476", "Apto 201", "(31) 97526-2097", "6944.44"],
-                                ["RODRIGO ANTUNES DE BARCELOS", "042.978.516-01", "30640-120", "465", "", "(31) 98812-5970", "729.17"],
-                                ["MARCIO MACEDO MOURA JUNIOR", "067.448.136-41", "30570-080", "660", "Apto 702", "(31) 99924-6557", "9500"],
-                                ["MARCIO MACEDO MOURA", "130.839.966-91", "31035-512", "1400", "Apto 106", "(31) 98414-0891", "8194.44"],
-                                ["CLAUDISON NEIVA RESENDE", "010.766.576-05", "34800-000", "5100", "", "(31) 9921-77045", "11250"],
-                                ["ERLY GOMES ARAUJO", "566.228.726-00", "30664-790", "633", "", "(31) 98842-7587", "3820.84"],
-                                ["ESTEVÃO TELES DE JESUS JUNIOR", "036.195.216-38", "30840-390", "46", "Apto 301", "(31) 99954-4698", "1204"],
-                                ["RAPHAEL DE MATOS MARTINS", "078.314.016-95", "34710-210", "747", "Apto 404", "(31) 98865-9145", "1299.08"],
-                                ["RAQUEL MARIANO DOS SANTOS", "559.863.156-34", "20541-190", "299", "Casa 10", "(21) 99941-6820", "8888.89"],
-                                ["VLADIMIR RODRIGUES MILAGRES", "861.640.076-15", "31720-350", "293", "", "(31) 99192-0470", "1299.08"],
-                                ["RICARDO VIEIRA NUNES", "056.882.776-70", "30575-080", "163", "AP 1200", "(31) 98822-5236", "2106.16"]
+                                ["EDSON FERREIRA TOLEDO", "534.142.506-59", "32606-016", "243", "", "(31) 9977-77088", 8972.22],
+                                ["ARLEY FRANÇA LEITE", "938.501.406-44", "31330-020", "446", "Apto 504", "(31) 9877-66564", 6078.53],
+                                ["MARCELO MAIA TEODORO", "065.584.286-10", "31330-040", "274", "Apto 401", "(31) 99632-6633", 2333.33],
+                                ["THALIS RODRIGUES DE PAULA", "116.999.526-80", "31110-130", "815", "Apto 101", "(31) 98573-1001", 1166.67],
+                                ["RAMON DE SOUZA MACHADO", "126.499.496-60", "30493-165", "158", "Apto 1002", "(31) 98422-7841", 1166.67],
+                                ["HENRIQUE SETTE GARCIA DE AGUIAR", "066.457.586-26", "31330-180", "476", "Apto 201", "(31) 97526-2097", 6944.44],
+                                ["RODRIGO ANTUNES DE BARCELOS", "042.978.516-01", "30640-120", "465", "", "(31) 98812-5970", 729.17],
+                                ["MARCIO MACEDO MOURA JUNIOR", "067.448.136-41", "30570-080", "660", "Apto 702", "(31) 99924-6557", 9500.00],
+                                ["MARCIO MACEDO MOURA", "130.839.966-91", "31035-512", "1400", "Apto 106", "(31) 98414-0891", 8194.44],
+                                ["CLAUDISON NEIVA RESENDE", "010.766.576-05", "34800-000", "5100", "", "(31) 9921-77045", 11250.00],
+                                ["ERLY GOMES ARAUJO", "566.228.726-00", "30664-790", "633", "", "(31) 98842-7587", 3820.84],
+                                ["ESTEVÃO TELES DE JESUS JUNIOR", "036.195.216-38", "30840-390", "46", "Apto 301", "(31) 99954-4698", 1204.00],
+                                ["RAPHAEL DE MATOS MARTINS", "078.314.016-95", "34710-210", "747", "Apto 404", "(31) 98865-9145", 1299.08],
+                                ["RAQUEL MARIANO DOS SANTOS", "559.863.156-34", "20541-190", "299", "Casa 10", "(21) 99941-6820", 8888.89],
+                                ["VLADIMIR RODRIGUES MILAGRES", "861.640.076-15", "31720-350", "293", "", "(31) 99192-0470", 1299.08],
+                                ["RICARDO VIEIRA NUNES", "056.882.776-70", "30575-080", "163", "AP 1200", "(31) 98822-5236", 2106.16]
                             ]
                             aba_cadastro.append_row(cabecalho)
                             for linha in dados_iniciais:
@@ -970,9 +971,7 @@ else:
                         df_emissao['CPF_CNPJ'] = df_emissao_cruza['CPF_CNPJ'].astype(str)
                         df_emissao['CEP'] = df_emissao_cruza['CEP'].astype(str)
                         
-                        # FORÇANDO O NÚMERO A SER TEXTO PURO (Sem o .0)
                         df_emissao['Numero'] = df_emissao_cruza['Numero'].astype(str).apply(lambda x: x.split('.')[0] if '.' in x else x)
-                        
                         df_emissao['Complemento'] = df_emissao_cruza['Complemento'].astype(str)
                         df_emissao['Vencimento'] = (pd.Timestamp.now() + pd.Timedelta(days=5)).strftime('%d/%m/%Y')
                         df_emissao['Valor_Parcela'] = df_emissao_cruza['Valor_Parcela'].apply(lambda x: safe_to_float(x) if x != "" else 0.00)
@@ -982,6 +981,7 @@ else:
                         
                         st.caption("Qualquer alteração feita nas colunas cadastrais pode ser salva permanentemente clicando no botão abaixo.")
                         
+                        # REMOVIDO O height=400 QUE ESTAVA CAUSANDO O SOBREPOSICIONAMENTO
                         df_editado = st.data_editor(
                             df_emissao,
                             column_config={
@@ -998,9 +998,11 @@ else:
                                 "Saldo_Devedor": st.column_config.NumberColumn("Saldo Restante", format="R$ %.2f", disabled=True)
                             },
                             hide_index=True,
-                            use_container_width=True,
-                            height=400
+                            use_container_width=True
                         )
+                        
+                        # FORÇANDO ESPAÇO EXTRA ANTES DOS BOTÕES
+                        st.markdown("<br><br>", unsafe_allow_html=True)
                         
                         col_btn1, col_btn2 = st.columns([1, 1])
                         
@@ -1052,7 +1054,6 @@ else:
                                                 pass
                                                 
                                         # (AQUI ENTRARÁ O CÓDIGO DO BANCO INTER USANDO AS VARIÁVEIS ACIMA)
-                                        # st.write(f"Enviando para o Inter: {rua_encontrada}, {numero} - {bairro_encontrado}, {cidade_encontrada}/{uf_encontrada}")
                                         
                                         link_boleto = "https://bancointer.com.br/boleto/exemplo_jl_123" 
                                         
