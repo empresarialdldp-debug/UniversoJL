@@ -1027,12 +1027,21 @@ else:
                                     st.success(f"Emitindo {len(clientes_selecionados)} boleto(s) no Banco Inter...")
                                     st.session_state.boletos_processados = []
                                     
-                                    # 1. CONFIGURAÇÃO REAL DO SDK USANDO SEUS SECRETS
+                                    # 1. CONFIGURAÇÃO REAL DO SDK USANDO SEUS SECRETS E O IMPORT DO REQUIREMENTS
                                     try:
-                                        # Importação oficial da biblioteca instalada pelo requirements.txt
-                                        from inter_sdk_python.inter_sdk import InterSdk
+                                        from inter_sdk.inter_sdk import InterSdk
+                                        from inter_sdk.billing.models.BillingIssueRequest import BillingIssueRequest
+                                        from inter_sdk.billing.models.Person import Person
+                                        try:
+                                            from inter_sdk.commons.models.PersonType import PersonType
+                                        except:
+                                            from inter_sdk.billing.enums.PersonType import PersonType
+                                            
+                                        import time
+                                        from decimal import Decimal
+                                        import re
+                                        import datetime as dt
                                         
-                                        # Parâmetros em ordem: Ambiente, ID, Secret, PFX (Base64) e Senha
                                         sdk = InterSdk(
                                             "PRODUCTION",
                                             st.secrets["inter"]["client_id"],
@@ -1043,89 +1052,107 @@ else:
                                         sdk.set_account(st.secrets["inter"]["conta_corrente"])
                                         
                                     except Exception as e:
-                                        st.error(f"Erro na conexão com o Banco Inter: Verifique se o 'inter-sdk' está no requirements.txt. Detalhe: {e}")
+                                        st.error(f"Erro na inicialização do Banco Inter: {e}")
                                         st.stop()
-                                    
-                                    for idx, row in clientes_selecionados.iterrows():
-                                        nome_completo = row['Nome_Cliente'].split('-')[0].strip()
-                                        zap = str(row['WhatsApp']).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                                        cep_limpo = str(row['CEP']).replace('-', '').replace('.', '').strip()
-                                        valor = row['Valor_Parcela']
-                                        vencimento = row['Vencimento']  # Formato DD/MM/AAAA da tela
-                                        numero = row['Numero']
-                                        cpf_cnpj_limpo = str(row['CPF_CNPJ']).replace('.', '').replace('-', '').replace('/', '').strip()
                                         
-                                        # 2. BUSCA DO ENDEREÇO PELO VIACEP
-                                        rua = "Endereço Padrão"
-                                        bairro = "Bairro Padrão"
-                                        cidade = "Belo Horizonte"
-                                        uf = "MG"
+                                    for idx, row in clientes_selecionados.iterrows():
+                                        nome_completo = str(row['Nome_Cliente'].split('-')[0]).strip()[:100]
+                                        zap = str(row['WhatsApp']).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                                        cep_limpo = re.sub(r'\D', '', str(row['CEP']))
+                                        valor = row['Valor_Parcela']
+                                        vencimento = row['Vencimento']
+                                        numero = str(row['Numero']).strip() if str(row['Numero']).strip() != "" else "0"
+                                        cpf_cnpj_limpo = re.sub(r'\D', '', str(row['CPF_CNPJ']))
+                                        
+                                        controle = f"JL{int(dt.datetime.now().timestamp())}S"
+                                        
+                                        # 2. BUSCA DO ENDEREÇO PELO VIACEP (Para não dar erro no Banco)
+                                        rua_encontrada = ""
+                                        bairro_encontrado = ""
+                                        cidade_encontrada = ""
+                                        uf_encontrada = ""
+                                        
                                         if len(cep_limpo) == 8:
                                             try:
                                                 resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
                                                 if resp_cep.status_code == 200 and 'erro' not in resp_cep.json():
                                                     dados_cep = resp_cep.json()
-                                                    rua = dados_cep.get('logradouro', rua)
-                                                    bairro = dados_cep.get('bairro', bairro)
-                                                    cidade = dados_cep.get('localidade', cidade)
-                                                    uf = dados_cep.get('uf', uf)
+                                                    rua_encontrada = dados_cep.get('logradouro', '')
+                                                    bairro_encontrado = dados_cep.get('bairro', '')
+                                                    cidade_encontrada = dados_cep.get('localidade', '')
+                                                    uf_encontrada = dados_cep.get('uf', '')
                                             except: pass
                                             
+                                        if not rua_encontrada:
+                                            st.error(f"❌ Não foi possível validar o CEP de {nome_completo}. O banco recusa emissão sem o nome da rua.")
+                                            continue
+                                            
                                         try:
-                                            # 3. PREPARANDO O PAGADOR
-                                            tipo_pessoa = PersonType.FISICA if len(cpf_cnpj_limpo) <= 11 else PersonType.JURIDICA
-                                            pagador = Person(
-                                                cpfCnpj=cpf_cnpj_limpo,
-                                                personType=tipo_pessoa,
-                                                name=nome_completo,
-                                                address=rua,
-                                                number=numero,
-                                                complement=str(row['Complemento']),
-                                                neighborhood=bairro,
-                                                city=cidade,
-                                                state=uf,
-                                                zipCode=cep_limpo
-                                            )
+                                            data_vencimento = dt.datetime.strptime(vencimento, '%d/%m/%Y').strftime('%Y-%m-%d')
                                             
-                                            # Formata a data de DD/MM/AAAA para AAAA-MM-DD para a API do Banco
-                                            vencimento_api = datetime.datetime.strptime(vencimento, '%d/%m/%Y').strftime('%Y-%m-%d')
+                                            # 3. PREPARANDO O PAGADOR (LÓGICA BLINDADA DO SEU SCRIPT)
+                                            pagador = Person()
+                                            pagador.nome = pagador.name = nome_completo
+                                            pagador.cpf_cnpj = pagador.cpfCnpj = cpf_cnpj_limpo
+                                            pagador.cep = pagador.zip_code = pagador.zipCode = cep_limpo
+                                            pagador.numero = pagador.number = numero
+                                            pagador.endereco = pagador.address = pagador.logradouro = rua_encontrada
+                                            pagador.cidade = pagador.city = cidade_encontrada
+                                            pagador.uf = pagador.state = uf_encontrada
+                                            pagador.bairro = pagador.neighborhood = bairro_encontrado
+                                            pagador.complemento = pagador.complement = str(row['Complemento'])
                                             
-                                            # 4. EMITINDO O BOLETO NO BANCO
-                                            boleto_req = BillingIssueRequest(
-                                                seuNumero=f"JL-{int(datetime.datetime.now().timestamp())}",
-                                                valorNominal=valor,
-                                                dataVencimento=vencimento_api,
-                                                numDiasAgenda=30,
-                                                pagador=pagador,
-                                                mensagem={"linha1": row['Descricao']}
-                                            )
-                                            
-                                            resposta_emissao = sdk.billing().issue_billing(boleto_req)
-                                            nosso_numero = resposta_emissao.nossoNumero
-                                            
-                                            # 5. RECUPERANDO O ARQUIVO PDF REAL DO BANCO
-                                            pdf_base64 = sdk.billing().retrieve_billing_pdf(nosso_numero)
-                                            import base64
-                                            pdf_bytes = base64.b64decode(pdf_base64)
-                                            
-                                            # 6. MENSAGEM DO WHATSAPP (Apenas com o texto pedindo para olhar o anexo)
-                                            texto_msg = f"Olá {nome_completo}, segue em anexo o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}."
-                                            link_wa = f"https://wa.me/55{zap}?text={texto_msg.replace(' ', '%20')}" if len(zap) >= 10 else None
-                                            
-                                            st.session_state.boletos_processados.append({
-                                                "nome": nome_completo,
-                                                "arquivo": pdf_bytes,
-                                                "link_wa": link_wa
-                                            })
-                                            st.success(f"✅ Boleto de {nome_completo} gerado com sucesso!")
-                                            
-                                        except Exception as e:
-                                            st.error(f"❌ Erro ao emitir para {nome_completo}: {e}")
+                                            p_type = PersonType.FISICA if len(cpf_cnpj_limpo) <= 11 else PersonType.JURIDICA
+                                            pagador.tipo_pessoa = pagador.tipoPessoa = pagador.person_type = pagador.personType = p_type
 
-                        # EXIBINDO OS BOTÕES PARA DOWNLOAD DO PDF REAL
+                                            # 4. PREPARANDO O BOLETO
+                                            boleto = BillingIssueRequest()
+                                            boleto.seu_numero = boleto.seuNumero = boleto.your_number = boleto.yourNumber = controle
+                                            val = Decimal(str(round(valor, 2)))
+                                            boleto.valor_nominal = boleto.valorNominal = boleto.nominal_value = boleto.nominalValue = val
+                                            boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
+                                            boleto.pagador = boleto.payer = pagador
+                                            boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
+                                            boleto.mensagem = {"linha1": str(row['Descricao'])[:78]} # Inter limita a 78 chars
+
+                                            # 5. EMISSÃO NO BANCO
+                                            res = sdk.billing().issue_billing(boleto)
+                                            n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None)
+                                            
+                                            if n_num:
+                                                st.info(f"⏳ Boleto de {nome_completo} gerado (NN: {n_num}). Aguardando 4s para o banco renderizar o PDF...")
+                                                time.sleep(4)
+                                                
+                                                try:
+                                                    # 6. DOWNLOAD DO PDF
+                                                    pdf_base64 = sdk.billing().retrieve_billing_pdf(str(n_num))
+                                                    import base64
+                                                    pdf_bytes = base64.b64decode(pdf_base64)
+                                                    
+                                                    texto_msg = f"Olá {nome_completo}, segue em anexo o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}."
+                                                    link_wa = f"https://wa.me/55{zap}?text={texto_msg.replace(' ', '%20')}" if len(zap) >= 10 else None
+                                                    
+                                                    st.session_state.boletos_processados.append({
+                                                        "nome": nome_completo,
+                                                        "arquivo": pdf_bytes,
+                                                        "link_wa": link_wa
+                                                    })
+                                                    st.success(f"🎉 PDF de {nome_completo} recebido com sucesso!")
+                                                except Exception as e_pdf:
+                                                    st.warning(f"⚠️ Boleto gerado, mas falha ao baixar o PDF: {e_pdf}")
+                                            else:
+                                                st.error(f"❌ Banco não retornou o Nosso Número para {nome_completo}.")
+                                                
+                                        except Exception as e:
+                                            msg_erro = str(e)
+                                            if hasattr(e, 'error') and e.error:
+                                                msg_erro = f"{e.error.detail} - " + " | ".join([f"{v.property}: {v.reason}" for v in getattr(e.error, 'violations', [])])
+                                            st.error(f"❌ Rejeitado pelo banco ({nome_completo}): {msg_erro}")
+
+                        # EXIBINDO OS BOTÕES DE DOWNLOAD
                         if st.session_state.get("boletos_processados"):
                             st.divider()
-                            st.markdown("### 🗂️ Boletos Gerados Prontos para Download")
+                            st.markdown("### 🗂️ Boletos Prontos para Envio")
                             
                             for i, bol in enumerate(st.session_state.boletos_processados):
                                 colA, colB, colC = st.columns([3, 2, 2])
@@ -1135,18 +1162,16 @@ else:
                                     st.download_button(
                                         label="📥 Baixar PDF Real",
                                         data=bol['arquivo'],
-                                        file_name=f"Boleto_JL_{bol['nome'].replace(' ', '_')}.pdf",
+                                        file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
                                         mime="application/pdf",
-                                        key=f"dl_real_{i}"
+                                        key=f"dl_{i}"
                                     )
                                 
                                 with colC:
                                     if bol['link_wa']:
-                                        st.markdown(f"[📲 Abrir WhatsApp do Cliente]({bol['link_wa']})")
+                                        st.markdown(f"[📲 Abrir WhatsApp]({bol['link_wa']})")
                                     else:
                                         st.caption("Sem telefone cadastrado.")
-                    else:
-                        st.success("🎉 Todos os contratos quitados.")
                         
             except Exception as e:
                 st.error(f"Erro ao processar o Dashboard: {e}")
