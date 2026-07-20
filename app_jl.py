@@ -864,35 +864,59 @@ else:
                         saldo_exibicao = saldo_atual[0] if len(saldo_atual) > 0 else 0.0
                         st.warning(f"⚠️ Saldo Devedor Atualizado: **R$ {saldo_exibicao:,.2f}**".replace(',', '_').replace('.', ',').replace('_', '.'))
                         
-                        col_ext1, col_btn2 = st.columns(2)
+                        st.markdown("#### 📥 Pagamentos Identificados")
+                        df_pag_cli = df_pagamentos[df_pagamentos['Chave'] == cliente_auditoria].copy()
                         
-                        with col_ext1:
-                            st.markdown("#### 📥 Pagamentos Identificados")
-                            df_pag_cli = df_pagamentos[df_pagamentos['Chave'] == cliente_auditoria].copy()
+                        if not df_pag_cli.empty:
+                            soma_pags = df_pag_cli['Valor_Recebido'].sum()
+                            st.success(f"Soma dos Pagamentos: R$ {soma_pags:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
                             
-                            if not df_pag_cli.empty:
-                                soma_pags = df_pag_cli['Valor_Recebido'].sum()
-                                st.success(f"Soma dos Pagamentos: R$ {soma_pags:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'))
-                                
-                                try:
-                                    df_disp_pag = df_pag_cli[['Data_Pagamento', 'Valor_Recebido']].copy()
-                                    df_disp_pag['Data_Real'] = pd.to_datetime(df_disp_pag['Data_Pagamento'], errors='coerce', format='mixed')
-                                    df_disp_pag = df_disp_pag.sort_values(by='Data_Real', ascending=True)
-                                    df_disp_pag['Data_Pagamento'] = df_disp_pag['Data_Real'].dt.strftime('%d/%m/%Y')
-                                    df_disp_pag = df_disp_pag[['Data_Pagamento', 'Valor_Recebido']]
-                                except:
-                                    pass
-                                
-                                st.dataframe(
-                                    df_disp_pag, 
-                                    column_config={
-                                        "Data_Pagamento": st.column_config.TextColumn("Data do Pagamento"),
-                                        "Valor_Recebido": st.column_config.NumberColumn("Valor Pago", format="R$ %.2f")
-                                    },
-                                    hide_index=True, use_container_width=True
-                                )
-                            else:
-                                st.warning("Nenhum pagamento localizado para esta chave exata.")
+                            try:
+                                df_disp_pag = df_pag_cli[['Data_Pagamento', 'Valor_Recebido']].copy()
+                                df_disp_pag['Data_Real'] = pd.to_datetime(df_disp_pag['Data_Pagamento'], errors='coerce', format='mixed')
+                                df_disp_pag = df_disp_pag.sort_values(by='Data_Real', ascending=True)
+                                df_disp_pag['Data_Pagamento'] = df_disp_pag['Data_Real'].dt.strftime('%d/%m/%Y')
+                                df_disp_pag = df_disp_pag[['Data_Pagamento', 'Valor_Recebido']]
+                            except:
+                                pass
+                            
+                            st.dataframe(
+                                df_disp_pag, 
+                                column_config={
+                                    "Data_Pagamento": st.column_config.TextColumn("Data do Pagamento"),
+                                    "Valor_Recebido": st.column_config.NumberColumn("Valor Pago", format="R$ %.2f")
+                                },
+                                hide_index=True, use_container_width=True
+                            )
+                        else:
+                            st.warning("Nenhum pagamento localizado para esta chave exata.")
+                
+                # ==========================================
+                # RECRIANDO A ABA DE BOLETOS (QUE HAVIA SUMIDO)
+                # ==========================================
+                with aba_boletos:
+                    st.subheader("🧾 Emissão Lote de Boletos - Banco Inter")
+                    st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
+                    
+                    # Trazendo a tabela de devedores de volta para a tela
+                    if 'df_devedores' not in locals() and 'df_devedores' not in globals():
+                        st.error("A tabela de devedores não foi carregada. Verifique os dados.")
+                    else:
+                        df_boletos_tela = df_devedores.copy()
+                        if 'Emitir' not in df_boletos_tela.columns:
+                            df_boletos_tela.insert(0, 'Emitir', False)
+                            
+                        # A Tabela interativa que havia sido deletada
+                        df_editado = st.data_editor(
+                            df_boletos_tela,
+                            column_config={
+                                "Emitir": st.column_config.CheckboxColumn("Gerar?", default=False)
+                            },
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                        
+                        col_btn1, col_btn2 = st.columns([2, 2])
                         
                         with col_btn2:
                             if st.button("🚀 Processar Boletos Selecionados", type="primary"):
@@ -1013,7 +1037,7 @@ else:
                                                 boleto.pagador = boleto.payer = pagador
                                                 
                                                 # ==========================================
-                                                # CORREÇÃO: REGRAS DE ATRASO (MULTA E MORA)
+                                                # REGRAS DE ATRASO (MULTA E MORA)
                                                 # ==========================================
                                                 boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
                                                 try:
@@ -1101,7 +1125,7 @@ else:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
 
-                        # EXIBIÇÃO FINAL
+                        # EXIBIÇÃO FINAL DOS BOLETOS
                         if st.session_state.get("boletos_processados"):
                             st.divider()
                             st.markdown("### 🗂️ Boletos Prontos para Envio")
@@ -1123,7 +1147,8 @@ else:
                                         st.caption("Sem telefone cadastrado.")
             except Exception as e:
                 st.error(f"Erro ao processar o Dashboard: {e}")
-                                
+
+    
     # --- TELA 5: FATURAMENTO (BOLETOS) ---
     elif modulo == "💸 Faturamento e Boletos":
         st.title("💸 Gestão de Recebíveis e Emissão")
