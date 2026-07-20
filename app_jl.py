@@ -1029,21 +1029,22 @@ else:
                                     
                                     # 1. CONFIGURAÇÃO REAL DO SDK USANDO SEUS SECRETS
                                     try:
-                                        # Busca a classe diretamente na raiz do pacote extraído
-                                        from inter_sdk_python import InterSdk
-                                    except ImportError:
-                                        # Fallback de segurança caso o arquivo base esteja capitalizado
-                                        from inter_sdk_python.InterSdk import InterSdk
-                                    
-                                    # Parâmetros em ordem: Ambiente, ID, Secret, PFX (Base64) e Senha
-                                    sdk = InterSdk(
-                                        "PRODUCTION",
-                                        st.secrets["inter"]["client_id"],
-                                        st.secrets["inter"]["client_secret"],
-                                        st.secrets["inter"]["pfx_base64"],
-                                        st.secrets["inter"]["cert_password"]
-                                    )
-                                    sdk.set_account(st.secrets["inter"]["conta_corrente"])
+                                        # Importação oficial da biblioteca instalada pelo requirements.txt
+                                        from inter_sdk_python.inter_sdk import InterSdk
+                                        
+                                        # Parâmetros em ordem: Ambiente, ID, Secret, PFX (Base64) e Senha
+                                        sdk = InterSdk(
+                                            "PRODUCTION",
+                                            st.secrets["inter"]["client_id"],
+                                            st.secrets["inter"]["client_secret"],
+                                            st.secrets["inter"]["pfx_base64"],
+                                            st.secrets["inter"]["cert_password"]
+                                        )
+                                        sdk.set_account(st.secrets["inter"]["conta_corrente"])
+                                        
+                                    except Exception as e:
+                                        st.error(f"Erro na conexão com o Banco Inter: Verifique se o 'inter-sdk' está no requirements.txt. Detalhe: {e}")
+                                        st.stop()
                                     
                                     for idx, row in clientes_selecionados.iterrows():
                                         nome_completo = row['Nome_Cliente'].split('-')[0].strip()
