@@ -1027,11 +1027,10 @@ else:
                                     st.success(f"Emitindo {len(clientes_selecionados)} boleto(s) no Banco Inter...")
                                     st.session_state.boletos_processados = []
                                     
-                                    # 1. ARQUITETURA BLINDADA DO PFX TEMPORÁRIO (A mesma do extrato)
+                                    # 1. ARQUITETURA DO PFX TEMPORÁRIO
                                     import tempfile
                                     import base64
                                     import os
-                                    import sys
                                     import datetime as dt
                                     from decimal import Decimal
                                     import re
@@ -1039,15 +1038,12 @@ else:
                                     
                                     caminho_pfx_temp = None
                                     try:
-                                        # USANDO O NOME EXATO DO SEU SECRETS
                                         creds_inter = st.secrets["inter_api"]
                                         
-                                        # Cria o certificado temporário na nuvem
                                         with tempfile.NamedTemporaryFile(delete=False, suffix='.pfx') as tmp_pfx:
                                             tmp_pfx.write(base64.b64decode(creds_inter["pfx_base64"]))
                                             caminho_pfx_temp = tmp_pfx.name
                                             
-                                        # Importações a partir do ZIP já descompactado no topo do seu código
                                         from inter_sdk_python.InterSdk import InterSdk
                                         from inter_sdk_python.billing.models.BillingIssueRequest import BillingIssueRequest
                                         from inter_sdk_python.billing.models.Person import Person
@@ -1059,7 +1055,6 @@ else:
                                                 FISICA = "FISICA"
                                                 JURIDICA = "JURIDICA"
                                                 
-                                        # Iniciando a conexão com o PFX físico temporário
                                         sdk = InterSdk(
                                             "PRODUCTION",
                                             creds_inter["client_id"],
@@ -1078,27 +1073,29 @@ else:
                                             vencimento = row['Vencimento']
                                             numero = str(row['Numero']).strip() if str(row['Numero']).strip() != "" else "0"
                                             cpf_cnpj_limpo = re.sub(r'\D', '', str(row['CPF_CNPJ']))
-                                            controle = f"JL{int(dt.datetime.now().timestamp())}S"
                                             
-                                            # Busca CEP para não dar erro na API
-                                            rua_encontrada = ""
-                                            bairro_encontrado = ""
-                                            cidade_encontrada = ""
-                                            uf_encontrada = ""
+                                            # BLINDAGEM 1: Controle de no máximo 15 caracteres para o seuNumero
+                                            # Ex: JL + ID da linha + Segundos finais = JL0456123S
+                                            segundos = str(int(dt.datetime.now().timestamp()))[-6:]
+                                            controle = f"JL{idx}{segundos}S"[:15]
+                                            
+                                            # BLINDAGEM 2: Busca do ViaCEP com fallback seguro (Padrão Excel)
+                                            rua_encontrada = "Logradouro"
+                                            bairro_encontrado = "Bairro"
+                                            cidade_encontrada = "Cidade"
+                                            uf_encontrada = "MG"
+                                            
                                             if len(cep_limpo) == 8:
                                                 try:
                                                     resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
                                                     if resp_cep.status_code == 200 and 'erro' not in resp_cep.json():
                                                         dados_cep = resp_cep.json()
-                                                        rua_encontrada = dados_cep.get('logradouro', '')
-                                                        bairro_encontrado = dados_cep.get('bairro', '')
-                                                        cidade_encontrada = dados_cep.get('localidade', '')
-                                                        uf_encontrada = dados_cep.get('uf', '')
+                                                        # Só substitui se o ViaCEP realmente devolver algo não vazio
+                                                        if dados_cep.get('logradouro'): rua_encontrada = dados_cep.get('logradouro')
+                                                        if dados_cep.get('bairro'): bairro_encontrado = dados_cep.get('bairro')
+                                                        if dados_cep.get('localidade'): cidade_encontrada = dados_cep.get('localidade')
+                                                        if dados_cep.get('uf'): uf_encontrada = dados_cep.get('uf')
                                                 except: pass
-                                                
-                                            if not rua_encontrada:
-                                                st.error(f"❌ Não foi possível validar o CEP de {nome_completo}. O banco recusa emissão sem o nome da rua.")
-                                                continue
                                                 
                                             try:
                                                 data_vencimento = dt.datetime.strptime(vencimento, '%d/%m/%Y').strftime('%Y-%m-%d')
@@ -1107,24 +1104,28 @@ else:
                                                 pagador = Person()
                                                 pagador.nome = pagador.name = nome_completo
                                                 pagador.cpf_cnpj = pagador.cpfCnpj = cpf_cnpj_limpo
-                                                pagador.cep = pagador.zip_code = pagador.zipCode = cep_limpo
+                                                pagador.cep = pagador.zip_code = pagador.zipCode = cep_limpo if len(cep_limpo) == 8 else "30000000"
                                                 pagador.numero = pagador.number = numero
                                                 pagador.endereco = pagador.address = pagador.logradouro = rua_encontrada
                                                 pagador.cidade = pagador.city = cidade_encontrada
                                                 pagador.uf = pagador.state = uf_encontrada
                                                 pagador.bairro = pagador.neighborhood = bairro_encontrado
                                                 
+                                                complemento_txt = str(row['Complemento']).strip()
+                                                if complemento_txt:
+                                                    pagador.complemento = pagador.complement = complemento_txt
+                                                
                                                 p_type = PersonType.FISICA if len(cpf_cnpj_limpo) <= 11 else PersonType.JURIDICA
                                                 pagador.tipo_pessoa = pagador.tipoPessoa = pagador.person_type = pagador.personType = p_type
 
                                                 # Boleto
                                                 boleto = BillingIssueRequest()
-                                                boleto.seu_numero = boleto.seuNumero = controle
-                                                boleto.valor_nominal = boleto.valorNominal = Decimal(str(round(valor, 2)))
-                                                boleto.data_vencimento = boleto.dataVencimento = data_vencimento
+                                                boleto.seu_numero = boleto.seuNumero = boleto.your_number = boleto.yourNumber = controle
+                                                val = Decimal(str(round(valor, 2)))
+                                                boleto.valor_nominal = boleto.valorNominal = boleto.nominal_value = boleto.nominalValue = val
+                                                boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
                                                 boleto.pagador = boleto.payer = pagador
-                                                boleto.num_dias_agenda = 30
-                                                boleto.mensagem = {"linha1": str(row['Descricao'])[:78]}
+                                                boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 0
 
                                                 # Emissão Direta
                                                 res = sdk.billing().issue_billing(boleto)
@@ -1135,7 +1136,6 @@ else:
                                                     import time
                                                     time.sleep(4)
                                                     
-                                                    # Recuperação com arquivo temporário
                                                     pdf_path = os.path.join(tempfile.gettempdir(), f"{controle}.pdf")
                                                     try:
                                                         sdk.billing().retrieve_billing_pdf(str(n_num), file=pdf_path)
@@ -1162,7 +1162,6 @@ else:
                                                 st.error(f"❌ Falha {nome_completo}: {msg}")
                                                 
                                     finally:
-                                        # Limpa o certificado da memória da nuvem
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
 
