@@ -919,9 +919,14 @@ else:
                     st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
                     
                     try:
-                        # 1. PUXA OS DADOS REAIS DO CLIENTE
+                        # 1. PUXA OS DADOS REAIS DO CLIENTE (CORREÇÃO DEFINITIVA DAS COLUNAS VAZIAS)
                         aba_clientes = planilha_master.worksheet("Cadastro_Clientes")
-                        df_boletos_tela = pd.DataFrame(aba_clientes.get_all_records())
+                        dados_aba = aba_clientes.get_all_values()
+                        
+                        if len(dados_aba) > 1:
+                            df_boletos_tela = pd.DataFrame(dados_aba[1:], columns=dados_aba[0])
+                        else:
+                            df_boletos_tela = pd.DataFrame()
                         
                         # Limpa colunas vazias
                         colunas_validas = [col for col in df_boletos_tela.columns if str(col).strip() != "" and not str(col).startswith("Unnamed")]
@@ -950,7 +955,7 @@ else:
                         if 'Emitir' not in df_boletos_tela.columns:
                             df_boletos_tela.insert(0, 'Emitir', False)
                             
-                        # 4. EXIBE A TABELA (Tudo o que estiver aqui será editável por você)
+                        # 4. EXIBE A TABELA EDITÁVEL
                         df_editado = st.data_editor(
                             df_boletos_tela,
                             column_config={
@@ -984,7 +989,7 @@ else:
                                     import math
                                     
                                     # ==========================================
-                                    # 1. GOOGLE DRIVE (CORREÇÃO PEM APLICADA)
+                                    # 1. GOOGLE DRIVE
                                     # ==========================================
                                     PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
                                     drive_service = None
@@ -1041,8 +1046,7 @@ else:
                                         # 3. MOTOR DE EMISSÃO
                                         # ==========================================
                                         for idx, row in clientes_selecionados.iterrows():
-                                            # LÊ AS COLUNAS DA IMAGEM
-                                            val_nome = row.get('Nome_Base', row.get('Nome_Cliente', ''))
+                                            val_nome = row.get('Nome_Base', '')
                                             val_cpf = row.get('CPF_CNPJ', '')
                                             val_zap = row.get('WhatsApp', '')
                                             val_cep = row.get('CEP', '30000000')
@@ -1069,11 +1073,9 @@ else:
                                                 st.error(f"❌ {nome_completo}: O Valor da parcela está zerado.")
                                                 continue
                                             
-                                            # BLINDAGEM 1: Controle de 15 caracteres para o seuNumero
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
-                                            controle = f"JL{idx}{segundos}S"[:15]
+                                            controle = f"JL{idx}{segundos}"[:15]
                                             
-                                            # BLINDAGEM 2: Busca do ViaCEP com fallback seguro (Padrão Excel)
                                             rua_encontrada, bairro_encontrado, cidade_encontrada, uf_encontrada = "Logradouro", "Bairro", "Cidade", "MG"
                                             if len(cep_limpo) == 8:
                                                 try:
