@@ -938,7 +938,7 @@ else:
                         col_btn1, col_btn2 = st.columns([2, 2])
                         
                         with col_btn2:
-                            if st.button("🚀 Processar Boletos Selecionados", type="primary"):
+                        if st.button("🚀 Processar Boletos Selecionados", type="primary"):
                             clientes_selecionados = df_editado[df_editado['Emitir'] == True]
                             
                             if clientes_selecionados.empty:
