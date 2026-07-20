@@ -977,7 +977,6 @@ else:
                                     import tempfile
                                     import base64
                                     import os
-                                    import datetime as dt
                                     from decimal import Decimal
                                     import re
                                     import requests
@@ -985,7 +984,7 @@ else:
                                     import math
                                     
                                     # ==========================================
-                                    # 1. INTEGRAÇÃO GOOGLE DRIVE 
+                                    # 1. GOOGLE DRIVE
                                     # ==========================================
                                     PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
                                     drive_service = None
@@ -1007,7 +1006,7 @@ else:
                                         st.warning(f"Drive Desconectado. PDF só na memória. Erro: {e}")
                                         
                                     # ==========================================
-                                    # 2. INTEGRAÇÃO BANCO INTER (IDÊNTICO ÀS 5H DA MANHÃ)
+                                    # 2. BANCO INTER
                                     # ==========================================
                                     caminho_pfx_temp = None
                                     try:
@@ -1027,58 +1026,46 @@ else:
                                                 FISICA = "FISICA"
                                                 JURIDICA = "JURIDICA"
                                                 
-                                        sdk = InterSdk(
-                                            "PRODUCTION",
-                                            creds_inter["client_id"],
-                                            creds_inter["client_secret"],
-                                            caminho_pfx_temp,
-                                            creds_inter["pfx_senha"]
-                                        )
+                                        sdk = InterSdk("PRODUCTION", creds_inter["client_id"], creds_inter["client_secret"], caminho_pfx_temp, creds_inter["pfx_senha"])
                                         sdk.set_account(creds_inter["conta_corrente"].replace("-",""))
                                         
+                                        def extrair_float(val):
+                                            v = str(val).replace('R$', '').strip()
+                                            if not v: return 0.0
+                                            if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+                                            elif ',' in v: v = v.replace(',', '.')
+                                            try: return float(v)
+                                            except: return 0.0
+
                                         # ==========================================
-                                        # 3. MOTOR DE EMISSÃO BLINDADO
+                                        # 3. MOTOR DE EMISSÃO
                                         # ==========================================
                                         for idx, row in clientes_selecionados.iterrows():
-                                            # RESGATE DA LEITURA CORRETA (Baseado na sua imagem)
-                                            val_nome = row.get('Nome_Base', row.get('Nome_Cliente', ''))
+                                            val_nome = row.get('Nome_Base', '')
                                             val_cpf = row.get('CPF_CNPJ', '')
                                             val_zap = row.get('WhatsApp', '')
                                             val_cep = row.get('CEP', '30000000')
                                             val_num = row.get('Numero', '0')
+                                            complemento_txt = str(row.get('Complemento', '')).strip()
+                                            
+                                            valor = extrair_float(row.get('Valor_Parcela', 0.0))
+                                            saldo_devedor = extrair_float(row.get('Saldo_Devedor', 0.0))
+                                            vencimento = str(row.get('Vencimento', data_padrao)).strip()
                                             
                                             nome_completo = str(val_nome).split('-')[0].strip()[:100]
                                             cpf_cnpj_limpo = re.sub(r'\D', '', str(val_cpf))
-                                            zap = str(val_zap).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                                            zap = re.sub(r'\D', '', str(val_zap))
                                             cep_limpo = re.sub(r'\D', '', str(val_cep))
                                             numero = str(val_num).strip() if str(val_num).strip() != "" else "0"
                                             
-                                            try: 
-                                                valor = float(str(row.get('Valor_Parcela', 0.0)).replace(',', '.'))
-                                            except: 
-                                                valor = 0.0
-                                                
-                                            # CRUCIAL: Tratamento da data que estava falhando (Força data atual + 5 dias no formato exigido pelo Inter)
-                                            try:
-                                                vencimento_tela = str(row.get('Vencimento', ''))
-                                                if vencimento_tela and vencimento_tela != "nan":
-                                                    data_vencimento = dt.datetime.strptime(vencimento_tela, '%d/%m/%Y').strftime('%Y-%m-%d')
-                                                else:
-                                                    data_vencimento = (dt.datetime.today() + dt.timedelta(days=5)).strftime('%Y-%m-%d')
-                                            except:
-                                                data_vencimento = (dt.datetime.today() + dt.timedelta(days=5)).strftime('%Y-%m-%d')
-                                                
-                                            saldo_devedor = float(row.get('Saldo_Devedor', 0))
-                                            
-                                            # Travas de Segurança
-                                            if not nome_completo or nome_completo.lower() == "nan":
-                                                st.error(f"❌ Linha ignorada: Nome do cliente vazio na base.")
+                                            if not nome_completo or nome_completo.lower() in ["nan", "none", ""]:
+                                                st.error(f"❌ Linha ignorada: Nome vazio.")
                                                 continue
                                             if len(cpf_cnpj_limpo) < 11:
                                                 st.error(f"❌ {nome_completo}: CPF/CNPJ inválido.")
                                                 continue
                                             if valor <= 0:
-                                                st.error(f"❌ {nome_completo}: Valor da parcela está zerado.")
+                                                st.error(f"❌ {nome_completo}: O Valor da parcela está zerado.")
                                                 continue
                                             
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
@@ -1097,6 +1084,11 @@ else:
                                                 except: pass
                                                 
                                             try:
+                                                try:
+                                                    data_vencimento = dt.datetime.strptime(vencimento, '%d/%m/%Y').strftime('%Y-%m-%d')
+                                                except:
+                                                    data_vencimento = (dt.datetime.today() + dt.timedelta(days=5)).strftime('%Y-%m-%d')
+                                                
                                                 pagador = Person()
                                                 pagador.nome = pagador.name = nome_completo
                                                 pagador.cpf_cnpj = pagador.cpfCnpj = cpf_cnpj_limpo
@@ -1107,8 +1099,7 @@ else:
                                                 pagador.uf = pagador.state = uf_encontrada
                                                 pagador.bairro = pagador.neighborhood = bairro_encontrado
                                                 
-                                                complemento_txt = str(row.get('Complemento', '')).strip()
-                                                if complemento_txt and complemento_txt.lower() != "nan": 
+                                                if complemento_txt and str(complemento_txt).lower() != "nan": 
                                                     pagador.complemento = pagador.complement = complemento_txt
                                                 
                                                 p_type = PersonType.FISICA if len(cpf_cnpj_limpo) <= 11 else PersonType.JURIDICA
@@ -1122,7 +1113,6 @@ else:
                                                 boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
                                                 boleto.pagador = boleto.payer = pagador
                                                 
-                                                # Juros e Multa Adicionados com Segurança
                                                 boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
                                                 try:
                                                     from inter_sdk_python.billing.models.Fine import Fine
@@ -1153,9 +1143,9 @@ else:
                                                         with open(pdf_path, "rb") as f:
                                                             pdf_bytes = f.read()
                                                             
-                                                        # UPLOAD PRO DRIVE 
+                                                        # UPLOAD PRO DRIVE
                                                         if drive_service:
-                                                            nome_arquivo = f"Boleto_JL_{nome_completo.replace(' ', '_')}.pdf"
+                                                            nome_arquivo = f"Boleto_JL_{nome_completo.replace(' ', '_')}_{vencimento.replace('/', '-')}.pdf"
                                                             media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf', resumable=True)
                                                             meta = {'name': nome_arquivo, 'parents': [PASTA_DRIVE_ID]}
                                                             
@@ -1167,11 +1157,10 @@ else:
                                                             
                                                         parcelas_restantes = math.ceil(saldo_devedor / float(valor)) if float(valor) > 0 else 0
                                                         saldo_formatado = f"{saldo_devedor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                                                        data_msg = dt.datetime.strptime(data_vencimento, '%Y-%m-%d').strftime('%d/%m/%Y')
                                                         
                                                         texto_msg = (
                                                             f"Olá {nome_completo}, tudo bem? "
-                                                            f"Segue o link para baixar o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {data_msg}.\n\n"
+                                                            f"Segue o link para baixar o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}.\n\n"
                                                             f"👉 *Acessar Boleto:* {link_do_drive if link_do_drive else '(Baixe o PDF abaixo)'}\n\n"
                                                             f"Informamos que o seu Saldo Devedor atualizado é de R$ {saldo_formatado}, "
                                                             f"restando aproximadamente {parcelas_restantes} parcela(s) para a quitação do seu contrato."
@@ -1204,7 +1193,6 @@ else:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
 
-                        # Renderiza os resultados
                         if st.session_state.get("boletos_processados"):
                             st.divider()
                             st.markdown("### 🗂️ Boletos Prontos para Envio")
@@ -1232,6 +1220,8 @@ else:
                                         st.caption("Sem telefone cadastrado.")
                     except Exception as e:
                         st.error(f"Erro ao carregar a aba 'Cadastro_Clientes': {e}")
+            except Exception as e:
+                st.error(f"Erro ao processar o Dashboard: {e}")
                         
 
     
