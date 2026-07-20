@@ -972,7 +972,7 @@ else:
                                     import math
                                     
                                     # ==========================================
-                                    # INTEGRAÇÃO GOOGLE DRIVE
+                                    # INTEGRAÇÃO GOOGLE DRIVE (CORREÇÃO DO PEM)
                                     # ==========================================
                                     PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
                                     drive_service = None
@@ -981,8 +981,13 @@ else:
                                         from googleapiclient.discovery import build
                                         from googleapiclient.http import MediaIoBaseUpload
                                         
+                                        # Conserta a quebra de linha da chave privada no Streamlit Cloud
+                                        creds_dict = dict(st.secrets["gcp_service_account"])
+                                        if "private_key" in creds_dict:
+                                            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+                                            
                                         creds_gcp = Credentials.from_service_account_info(
-                                            st.secrets["gcp_service_account"],
+                                            creds_dict,
                                             scopes=['https://www.googleapis.com/auth/drive']
                                         )
                                         drive_service = build('drive', 'v3', credentials=creds_gcp)
@@ -1020,17 +1025,42 @@ else:
                                         sdk.set_account(creds_inter["conta_corrente"].replace("-",""))
                                         
                                         # ==========================================
-                                        # ROTINA DE EMISSÃO
+                                        # ROTINA DE EMISSÃO (BUSCA INTELIGENTE DE COLUNAS)
                                         # ==========================================
                                         for idx, row in clientes_selecionados.iterrows():
-                                            nome_completo = str(row.get('Nome_Cliente', 'Cliente')).split('-')[0].strip()[:100]
-                                            zap = str(row.get('WhatsApp', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                                            cep_limpo = re.sub(r'\D', '', str(row.get('CEP', '30000000')))
-                                            valor = float(row.get('Valor_Parcela', 0.0))
-                                            vencimento = str(row.get('Vencimento', dt.datetime.today().strftime('%d/%m/%Y')))
-                                            numero = str(row.get('Numero', '0')).strip() if str(row.get('Numero', '0')).strip() != "" else "0"
-                                            cpf_cnpj_limpo = re.sub(r'\D', '', str(row.get('CPF_CNPJ', '00000000000')))
+                                            # Procura as colunas usando os nomes mais comuns
+                                            val_nome = row.get('Nome_Cliente', row.get('Nome', row.get('Cliente', row.get('NOME DO ADQUIRENTE', ''))))
+                                            val_cpf = row.get('CPF_CNPJ', row.get('CPF', row.get('CNPJ', '')))
+                                            val_zap = row.get('WhatsApp', row.get('Celular', row.get('Telefone', '')))
+                                            val_cep = row.get('CEP', row.get('Cep', '30000000'))
+                                            val_valor = row.get('Valor_Parcela', row.get('Valor', row.get('Parcela', row.get('VALOR DA PARCELA', 0.0))))
+                                            val_venc = row.get('Vencimento', row.get('Data', dt.datetime.today().strftime('%d/%m/%Y')))
+                                            val_num = row.get('Numero', row.get('Número', '0'))
+                                            
+                                            nome_completo = str(val_nome).split('-')[0].strip()[:100]
+                                            cpf_cnpj_limpo = re.sub(r'\D', '', str(val_cpf))
+                                            zap = str(val_zap).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                                            cep_limpo = re.sub(r'\D', '', str(val_cep))
+                                            numero = str(val_num).strip() if str(val_num).strip() != "" else "0"
+                                            
+                                            try:
+                                                valor = float(val_valor)
+                                            except:
+                                                valor = 0.0
+                                                
                                             saldo_devedor = float(row.get('Saldo_Devedor', 0))
+                                            vencimento = str(val_venc)
+                                            
+                                            # TRAVA DE SEGURANÇA: Impede o envio de "Cliente Genérico" ou "Valor Zerado" para o Inter
+                                            if not nome_completo or nome_completo.lower() == "nan":
+                                                st.error(f"❌ Linha ignorada: Nome do cliente não encontrado. Verifique o cabeçalho de Nome na planilha.")
+                                                continue
+                                            if len(cpf_cnpj_limpo) < 11:
+                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido ou ausente na planilha.")
+                                                continue
+                                            if valor <= 0:
+                                                st.error(f"❌ {nome_completo}: O valor do boleto está zerado (R$ 0.0). Verifique a coluna de Valor na planilha.")
+                                                continue
                                             
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
                                             controle = f"JL{idx}{segundos}S"[:15]
@@ -1151,32 +1181,32 @@ else:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
 
-                        # EXIBIÇÃO FINAL DOS BOLETOS PARA DOWNLOAD E ZAP
-                        if st.session_state.get("boletos_processados"):
-                            st.divider()
-                            st.markdown("### 🗂️ Boletos Prontos para Envio")
+                    # EXIBIÇÃO FINAL DOS BOLETOS PARA DOWNLOAD E ZAP
+                    if st.session_state.get("boletos_processados"):
+                        st.divider()
+                        st.markdown("### 🗂️ Boletos Prontos para Envio")
+                        
+                        for i, bol in enumerate(st.session_state.boletos_processados):
+                            colA, colB, colC = st.columns([3, 2, 2])
+                            colA.markdown(f"**{bol['nome']}**")
                             
-                            for i, bol in enumerate(st.session_state.boletos_processados):
-                                colA, colB, colC = st.columns([3, 2, 2])
-                                colA.markdown(f"**{bol['nome']}**")
-                                
-                                with colB:
-                                    if bol['link_drive']:
-                                        st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
-                                    else:
-                                        st.download_button(
-                                            label="📥 Baixar PDF Original",
-                                            data=bol['arquivo'],
-                                            file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
-                                            mime="application/pdf",
-                                            key=f"dl_{i}"
-                                        )
-                                
-                                with colC:
-                                    if bol['link_wa']:
-                                        st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
-                                    else:
-                                        st.caption("Sem telefone cadastrado.")
+                            with colB:
+                                if bol['link_drive']:
+                                    st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
+                                else:
+                                    st.download_button(
+                                        label="📥 Baixar PDF Original",
+                                        data=bol['arquivo'],
+                                        file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
+                                        mime="application/pdf",
+                                        key=f"dl_{i}"
+                                    )
+                            
+                            with colC:
+                                if bol['link_wa']:
+                                    st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
+                                else:
+                                    st.caption("Sem telefone cadastrado.")
                     except Exception as e:
                         st.error(f"Erro ao carregar a aba 'Cadastro_Clientes': {e}")
             except Exception as e:
