@@ -892,7 +892,7 @@ else:
                                     hide_index=True, use_container_width=True
                                 )
                             else:
-                                st.warning("Nenhum pagamento localizado para esta chave.")
+                                st.warning("Nenhum pagamento localizado.")
 
                         with col_ext2:
                             st.markdown("#### ⚙️ Ajustes e Correções")
@@ -905,7 +905,7 @@ else:
                                         df_disp_ajuste = df_ajuste_cli[['Data_Ajuste', 'Valor_Ajuste', 'Motivo']].copy()
                                         st.dataframe(df_disp_ajuste, hide_index=True, use_container_width=True)
                                     else:
-                                        st.info("Nenhuma correção/taxa lançada para este contrato.")
+                                        st.info("Nenhuma correção lançada para este contrato.")
                                 else:
                                     st.caption("A base de dados de correções não está carregada.")
                             except:
@@ -918,250 +918,225 @@ else:
                     st.subheader("🧾 Emissão Lote de Boletos - Banco Inter")
                     st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
                     
+                    # ⚠️ IMPORTANTE: Se a tabela com os nomes, CPF, Vencimento etc for outra (como df_devedores), mude df_dash para df_devedores abaixo!
                     try:
-                        # Corrigido: Usando a base df_dash (se a sua base de clientes tiver outro nome específico, basta trocar 'df_dash' abaixo)
                         df_boletos_tela = df_dash.copy()
-                        if 'Emitir' not in df_boletos_tela.columns:
-                            df_boletos_tela.insert(0, 'Emitir', False)
+                    except NameError:
+                        st.error("Base de dados principal não encontrada.")
+                        st.stop()
+                    
+                    if 'Emitir' not in df_boletos_tela.columns:
+                        df_boletos_tela.insert(0, 'Emitir', False)
+                        
+                    df_editado = st.data_editor(
+                        df_boletos_tela,
+                        column_config={"Emitir": st.column_config.CheckboxColumn("Gerar?", default=False)},
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                    
+                    col_btn1, col_btn2 = st.columns([2, 2])
+                    
+                    with col_btn2:
+                        if st.button("🚀 Processar Boletos Selecionados", type="primary"):
+                            clientes_selecionados = df_editado[df_editado['Emitir'] == True]
                             
-                        df_editado = st.data_editor(
-                            df_boletos_tela,
-                            column_config={
-                                "Emitir": st.column_config.CheckboxColumn("Gerar?", default=False)
-                            },
-                            hide_index=True,
-                            use_container_width=True
-                        )
-                        
-                        col_btn1, col_btn2 = st.columns([2, 2])
-                        
-                        with col_btn2:
-                            if st.button("🚀 Processar Boletos Selecionados", type="primary"):
-                                clientes_selecionados = df_editado[df_editado['Emitir'] == True]
+                            if clientes_selecionados.empty:
+                                st.warning("Selecione pelo menos um cliente marcando a caixa 'Gerar?'.")
+                            else:
+                                st.success(f"Emitindo {len(clientes_selecionados)} boleto(s)...")
+                                st.session_state.boletos_processados = []
                                 
-                                if clientes_selecionados.empty:
-                                    st.warning("Selecione pelo menos um cliente marcando a caixa 'Gerar?'.")
-                                else:
-                                    st.success(f"Emitindo {len(clientes_selecionados)} boleto(s)...")
-                                    st.session_state.boletos_processados = []
-                                    
-                                    import tempfile
-                                    import base64
-                                    import os
-                                    import datetime as dt
-                                    from decimal import Decimal
-                                    import re
-                                    import requests
-                                    import io
-                                    import math
-                                    
-                                    # ==========================================
-                                    # 1. CONFIGURAÇÃO GOOGLE DRIVE (LINK PÚBLICO)
-                                    # ==========================================
-                                    PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
-                                    drive_service = None
-                                    try:
-                                        from google.oauth2.service_account import Credentials
-                                        from googleapiclient.discovery import build
-                                        from googleapiclient.http import MediaIoBaseUpload
+                                import tempfile
+                                import base64
+                                import os
+                                import datetime as dt
+                                from decimal import Decimal
+                                import re
+                                import requests
+                                import io
+                                import math
+                                
+                                # ==========================================
+                                # 1. CONFIGURAÇÃO GOOGLE DRIVE (LINK PÚBLICO)
+                                # ==========================================
+                                PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
+                                drive_service = None
+                                try:
+                                    from google.oauth2.service_account import Credentials
+                                    from googleapiclient.discovery import build
+                                    from googleapiclient.http import MediaIoBaseUpload
+                                    creds_gcp = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=['https://www.googleapis.com/auth/drive'])
+                                    drive_service = build('drive', 'v3', credentials=creds_gcp)
+                                except Exception as e:
+                                    st.warning(f"Drive Desconectado (O PDF não será salvo na nuvem). Erro: {e}")
+                                
+                                # ==========================================
+                                # 2. CONFIGURAÇÃO BANCO INTER
+                                # ==========================================
+                                caminho_pfx_temp = None
+                                try:
+                                    creds_inter = st.secrets["inter_api"]
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pfx') as tmp_pfx:
+                                        tmp_pfx.write(base64.b64decode(creds_inter["pfx_base64"]))
+                                        caminho_pfx_temp = tmp_pfx.name
                                         
-                                        creds_gcp = Credentials.from_service_account_info(
-                                            st.secrets["gcp_service_account"],
-                                            scopes=['https://www.googleapis.com/auth/drive']
-                                        )
-                                        drive_service = build('drive', 'v3', credentials=creds_gcp)
-                                    except Exception as e:
-                                        st.warning(f"Drive Desconectado (O PDF não será salvo na nuvem). Erro: {e}")
+                                    from inter_sdk_python.InterSdk import InterSdk
+                                    from inter_sdk_python.billing.models.BillingIssueRequest import BillingIssueRequest
+                                    from inter_sdk_python.billing.models.Person import Person
+                                    try:
+                                        from inter_sdk_python.commons.models.PersonType import PersonType
+                                    except:
+                                        from enum import Enum
+                                        class PersonType(Enum):
+                                            FISICA = "FISICA"
+                                            JURIDICA = "JURIDICA"
+                                            
+                                    sdk = InterSdk("PRODUCTION", creds_inter["client_id"], creds_inter["client_secret"], caminho_pfx_temp, creds_inter["pfx_senha"])
+                                    sdk.set_account(creds_inter["conta_corrente"].replace("-",""))
                                     
                                     # ==========================================
-                                    # 2. CONFIGURAÇÃO BANCO INTER
+                                    # 3. MOTOR DE EMISSÃO E LINKS
                                     # ==========================================
-                                    caminho_pfx_temp = None
-                                    try:
-                                        creds_inter = st.secrets["inter_api"]
-                                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pfx') as tmp_pfx:
-                                            tmp_pfx.write(base64.b64decode(creds_inter["pfx_base64"]))
-                                            caminho_pfx_temp = tmp_pfx.name
+                                    for idx, row in clientes_selecionados.iterrows():
+                                        nome_completo = str(row.get('Nome_Cliente', 'Cliente')).split('-')[0].strip()[:100]
+                                        zap = str(row.get('WhatsApp', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                                        cep_limpo = re.sub(r'\D', '', str(row.get('CEP', '30000000')))
+                                        valor = float(row.get('Valor_Parcela', 0.0))
+                                        vencimento = str(row.get('Vencimento', dt.datetime.today().strftime('%d/%m/%Y')))
+                                        numero = str(row.get('Numero', '0')).strip()
+                                        if not numero: numero = "0"
+                                        cpf_cnpj_limpo = re.sub(r'\D', '', str(row.get('CPF_CNPJ', '00000000000')))
+                                        saldo_devedor = float(row.get('Saldo_Devedor', 0))
+                                        
+                                        segundos = str(int(dt.datetime.now().timestamp()))[-6:]
+                                        controle = f"JL{idx}{segundos}S"[:15]
+                                        
+                                        rua_encontrada, bairro_encontrado, cidade_encontrada, uf_encontrada = "Logradouro", "Bairro", "Cidade", "MG"
+                                        if len(cep_limpo) == 8:
+                                            try:
+                                                resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
+                                                if resp_cep.status_code == 200 and 'erro' not in resp_cep.json():
+                                                    d_cep = resp_cep.json()
+                                                    if d_cep.get('logradouro'): rua_encontrada = d_cep.get('logradouro')
+                                                    if d_cep.get('bairro'): bairro_encontrado = d_cep.get('bairro')
+                                                    if d_cep.get('localidade'): cidade_encontrada = d_cep.get('localidade')
+                                                    if d_cep.get('uf'): uf_encontrada = d_cep.get('uf')
+                                            except: pass
                                             
-                                        from inter_sdk_python.InterSdk import InterSdk
-                                        from inter_sdk_python.billing.models.BillingIssueRequest import BillingIssueRequest
-                                        from inter_sdk_python.billing.models.Person import Person
                                         try:
-                                            from inter_sdk_python.commons.models.PersonType import PersonType
-                                        except:
-                                            from enum import Enum
-                                            class PersonType(Enum):
-                                                FISICA = "FISICA"
-                                                JURIDICA = "JURIDICA"
-                                                
-                                        sdk = InterSdk(
-                                            "PRODUCTION",
-                                            creds_inter["client_id"],
-                                            creds_inter["client_secret"],
-                                            caminho_pfx_temp,
-                                            creds_inter["pfx_senha"]
-                                        )
-                                        sdk.set_account(creds_inter["conta_corrente"].replace("-",""))
-                                        
-                                        # ==========================================
-                                        # 3. MOTOR DE EMISSÃO E LINKS
-                                        # ==========================================
-                                        for idx, row in clientes_selecionados.iterrows():
-                                            nome_completo = str(row['Nome_Cliente'].split('-')[0]).strip()[:100]
-                                            zap = str(row['WhatsApp']).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-                                            cep_limpo = re.sub(r'\D', '', str(row['CEP']))
-                                            valor = float(row['Valor_Parcela'])
-                                            vencimento = row['Vencimento']
-                                            numero = str(row['Numero']).strip() if str(row['Numero']).strip() != "" else "0"
-                                            cpf_cnpj_limpo = re.sub(r'\D', '', str(row['CPF_CNPJ']))
-                                            
-                                            saldo_devedor = float(row.get('Saldo_Devedor', 0))
-                                            
-                                            segundos = str(int(dt.datetime.now().timestamp()))[-6:]
-                                            controle = f"JL{idx}{segundos}S"[:15]
-                                            
-                                            rua_encontrada, bairro_encontrado, cidade_encontrada, uf_encontrada = "Logradouro", "Bairro", "Cidade", "MG"
-                                            if len(cep_limpo) == 8:
-                                                try:
-                                                    resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
-                                                    if resp_cep.status_code == 200 and 'erro' not in resp_cep.json():
-                                                        d_cep = resp_cep.json()
-                                                        if d_cep.get('logradouro'): rua_encontrada = d_cep.get('logradouro')
-                                                        if d_cep.get('bairro'): bairro_encontrado = d_cep.get('bairro')
-                                                        if d_cep.get('localidade'): cidade_encontrada = d_cep.get('localidade')
-                                                        if d_cep.get('uf'): uf_encontrada = d_cep.get('uf')
-                                                except: pass
-                                                
                                             try:
                                                 data_vencimento = dt.datetime.strptime(vencimento, '%d/%m/%Y').strftime('%Y-%m-%d')
-                                                
-                                                pagador = Person()
-                                                pagador.nome = pagador.name = nome_completo
-                                                pagador.cpf_cnpj = pagador.cpfCnpj = cpf_cnpj_limpo
-                                                pagador.cep = pagador.zip_code = pagador.zipCode = cep_limpo if len(cep_limpo) == 8 else "30000000"
-                                                pagador.numero = pagador.number = numero
-                                                pagador.endereco = pagador.address = pagador.logradouro = rua_encontrada
-                                                pagador.cidade = pagador.city = cidade_encontrada
-                                                pagador.uf = pagador.state = uf_encontrada
-                                                pagador.bairro = pagador.neighborhood = bairro_encontrado
-                                                if str(row['Complemento']).strip(): pagador.complemento = pagador.complement = str(row['Complemento']).strip()
-                                                pagador.tipo_pessoa = pagador.tipoPessoa = pagador.person_type = pagador.personType = PersonType.FISICA if len(cpf_cnpj_limpo) <= 11 else PersonType.JURIDICA
-
-                                                boleto = BillingIssueRequest()
-                                                boleto.seu_numero = boleto.seuNumero = boleto.your_number = boleto.yourNumber = controle
-                                                boleto.valor_nominal = boleto.valorNominal = boleto.nominal_value = boleto.nominalValue = Decimal(str(round(valor, 2)))
-                                                boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
-                                                boleto.pagador = boleto.payer = pagador
-                                                
-                                                # ==========================================
-                                                # REGRAS DE ATRASO (MULTA E MORA)
-                                                # ==========================================
-                                                boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
-                                                try:
-                                                    from inter_sdk_python.billing.models.Fine import Fine
-                                                    from inter_sdk_python.billing.models.Mora import Mora
-                                                    
-                                                    multa = Fine()
-                                                    multa.codigo_multa = multa.codigoMulta = "PERCENTUAL"
-                                                    multa.taxa = Decimal("2.00")
-                                                    boleto.multa = boleto.fine = multa
-                                                    
-                                                    mora = Mora()
-                                                    mora.codigo_mora = mora.codigoMora = "TAXA_MENSAL"
-                                                    mora.taxa = Decimal("1.00")
-                                                    boleto.mora = mora
-                                                except Exception as err_regra:
-                                                    st.toast(f"Aviso: As regras de multa não foram aplicadas. {err_regra}")
-
-                                                # Emissão
-                                                res = sdk.billing().issue_billing(boleto)
-                                                n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None) or (res.get('nossoNumero') if isinstance(res, dict) else None) or (res.get('request_code') if isinstance(res, dict) else getattr(res, 'request_code', None))
-                                                
-                                                if n_num:
-                                                    st.info(f"⏳ Renderizando boleto (Cód: {str(n_num)[:8]}...).")
-                                                    import time
-                                                    time.sleep(4)
-                                                    
-                                                    pdf_path = os.path.join(tempfile.gettempdir(), f"{controle}.pdf")
-                                                    link_do_drive = ""
-                                                    
-                                                    try:
-                                                        sdk.billing().retrieve_billing_pdf(str(n_num), file=pdf_path)
-                                                        with open(pdf_path, "rb") as f:
-                                                            pdf_bytes = f.read()
-                                                            
-                                                        # UPLOAD E GERAÇÃO DE LINK PÚBLICO
-                                                        if drive_service:
-                                                            nome_arquivo = f"Boleto_JL_{nome_completo.replace(' ', '_')}_{vencimento.replace('/', '-')}.pdf"
-                                                            media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf', resumable=True)
-                                                            meta = {'name': nome_arquivo, 'parents': [PASTA_DRIVE_ID]}
-                                                            
-                                                            arquivo_drive = drive_service.files().create(body=meta, media_body=media, fields='id').execute()
-                                                            file_id = arquivo_drive.get('id')
-                                                            
-                                                            drive_service.permissions().create(
-                                                                fileId=file_id,
-                                                                body={'type': 'anyone', 'role': 'reader'}
-                                                            ).execute()
-                                                            
-                                                            file_info = drive_service.files().get(fileId=file_id, fields='webViewLink').execute()
-                                                            link_do_drive = file_info.get('webViewLink')
-                                                        
-                                                        # MONTAGEM DA MENSAGEM DO ZAP
-                                                        parcelas_restantes = math.ceil(saldo_devedor / valor) if valor > 0 else 0
-                                                        saldo_formatado = f"{saldo_devedor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                                                        
-                                                        texto_msg = (
-                                                            f"Olá {nome_completo}, tudo bem? "
-                                                            f"Segue o link para baixar o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}.\n\n"
-                                                            f"👉 *Acessar Boleto:* {link_do_drive if link_do_drive else '(Baixe o PDF acima)'}\n\n"
-                                                            f"Informamos que o seu Saldo Devedor atualizado é de R$ {saldo_formatado}, "
-                                                            f"restando aproximadamente {parcelas_restantes} parcela(s) para a quitação do seu contrato."
-                                                        )
-                                                        
-                                                        link_wa = f"https://wa.me/55{zap}?text={requests.utils.quote(texto_msg)}" if len(zap) >= 10 else None
-                                                        
-                                                        st.session_state.boletos_processados.append({
-                                                            "nome": nome_completo,
-                                                            "arquivo": pdf_bytes,
-                                                            "link_wa": link_wa,
-                                                            "link_drive": link_do_drive
-                                                        })
-                                                        st.success(f"🎉 PDF de {nome_completo} gerado e salvo!")
-                                                    except Exception as erro_pdf:
-                                                        st.warning(f"⚠️ Boleto gerado, mas erro no PDF/Drive: {erro_pdf}")
-                                                else:
-                                                    st.error(f"❌ Banco não retornou rastreio para {nome_completo}.")
+                                            except:
+                                                data_vencimento = dt.datetime.today().strftime('%Y-%m-%d')
                                             
-                                            except Exception as erro_emissao:
-                                                msg = str(erro_emissao)
-                                                if hasattr(erro_emissao, 'error') and erro_emissao.error: msg = erro_emissao.error.detail
-                                                st.error(f"❌ Falha ao emitir {nome_completo}: {msg}")
-                                                
-                                    finally:
-                                        if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
-                                            os.remove(caminho_pfx_temp)
+                                            pagador = Person()
+                                            pagador.nome = pagador.name = nome_completo
+                                            pagador.cpf_cnpj = pagador.cpfCnpj = cpf_cnpj_limpo
+                                            pagador.cep = pagador.zip_code = pagador.zipCode = cep_limpo if len(cep_limpo) == 8 else "30000000"
+                                            pagador.numero = pagador.number = numero
+                                            pagador.endereco = pagador.address = pagador.logradouro = rua_encontrada
+                                            pagador.cidade = pagador.city = cidade_encontrada
+                                            pagador.uf = pagador.state = uf_encontrada
+                                            pagador.bairro = pagador.neighborhood = bairro_encontrado
+                                            if str(row.get('Complemento', '')).strip(): pagador.complemento = pagador.complement = str(row.get('Complemento', '')).strip()
+                                            pagador.tipo_pessoa = pagador.tipoPessoa = pagador.person_type = pagador.personType = PersonType.FISICA if len(cpf_cnpj_limpo) <= 11 else PersonType.JURIDICA
 
-                        # EXIBIÇÃO FINAL DOS BOLETOS
-                        if st.session_state.get("boletos_processados"):
-                            st.divider()
-                            st.markdown("### 🗂️ Boletos Prontos para Envio")
+                                            boleto = BillingIssueRequest()
+                                            boleto.seu_numero = boleto.seuNumero = boleto.your_number = boleto.yourNumber = controle
+                                            boleto.valor_nominal = boleto.valorNominal = boleto.nominal_value = boleto.nominalValue = Decimal(str(round(valor, 2)))
+                                            boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
+                                            boleto.pagador = boleto.payer = pagador
+                                            
+                                            # ==========================================
+                                            # REGRAS DE ATRASO (MULTA E MORA)
+                                            # ==========================================
+                                            boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
+                                            try:
+                                                from inter_sdk_python.billing.models.Fine import Fine
+                                                from inter_sdk_python.billing.models.Mora import Mora
+                                                multa = Fine(); multa.codigo_multa = multa.codigoMulta = "PERCENTUAL"; multa.taxa = Decimal("2.00"); boleto.multa = boleto.fine = multa
+                                                mora = Mora(); mora.codigo_mora = mora.codigoMora = "TAXA_MENSAL"; mora.taxa = Decimal("1.00"); boleto.mora = mora
+                                            except Exception as err_regra:
+                                                pass
+
+                                            # Emissão
+                                            res = sdk.billing().issue_billing(boleto)
+                                            n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None) or (res.get('nossoNumero') if isinstance(res, dict) else None) or (res.get('request_code') if isinstance(res, dict) else getattr(res, 'request_code', None))
+                                            
+                                            if n_num:
+                                                st.info(f"⏳ Renderizando boleto (Cód: {str(n_num)[:8]}...).")
+                                                import time
+                                                time.sleep(4)
+                                                
+                                                pdf_path = os.path.join(tempfile.gettempdir(), f"{controle}.pdf")
+                                                link_do_drive = ""
+                                                
+                                                try:
+                                                    sdk.billing().retrieve_billing_pdf(str(n_num), file=pdf_path)
+                                                    with open(pdf_path, "rb") as f:
+                                                        pdf_bytes = f.read()
+                                                        
+                                                    if drive_service:
+                                                        nome_arquivo = f"Boleto_JL_{nome_completo.replace(' ', '_')}_{vencimento.replace('/', '-')}.pdf"
+                                                        media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf', resumable=True)
+                                                        arquivo_drive = drive_service.files().create(body={'name': nome_arquivo, 'parents': [PASTA_DRIVE_ID]}, media_body=media, fields='id').execute()
+                                                        file_id = arquivo_drive.get('id')
+                                                        drive_service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
+                                                        link_do_drive = drive_service.files().get(fileId=file_id, fields='webViewLink').execute().get('webViewLink')
+                                                    
+                                                    parcelas_restantes = math.ceil(saldo_devedor / valor) if valor > 0 else 0
+                                                    saldo_formatado = f"{saldo_devedor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                                                    
+                                                    texto_msg = (
+                                                        f"Olá {nome_completo}, tudo bem? "
+                                                        f"Segue o link para baixar o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}.\n\n"
+                                                        f"👉 *Acessar Boleto:* {link_do_drive if link_do_drive else '(Baixe o PDF acima)'}\n\n"
+                                                        f"Informamos que o seu Saldo Devedor atualizado é de R$ {saldo_formatado}, "
+                                                        f"restando aproximadamente {parcelas_restantes} parcela(s) para a quitação do seu contrato."
+                                                    )
+                                                    
+                                                    link_wa = f"https://wa.me/55{zap}?text={requests.utils.quote(texto_msg)}" if len(zap) >= 10 else None
+                                                    
+                                                    st.session_state.boletos_processados.append({
+                                                        "nome": nome_completo,
+                                                        "arquivo": pdf_bytes,
+                                                        "link_wa": link_wa,
+                                                        "link_drive": link_do_drive
+                                                    })
+                                                    st.success(f"🎉 PDF de {nome_completo} gerado e salvo!")
+                                                except Exception as erro_pdf:
+                                                    st.warning(f"⚠️ Boleto gerado, mas erro no PDF/Drive: {erro_pdf}")
+                                            else:
+                                                st.error(f"❌ Banco não retornou rastreio para {nome_completo}.")
+                                        except Exception as erro_emissao:
+                                            msg = str(erro_emissao)
+                                            if hasattr(erro_emissao, 'error') and erro_emissao.error: msg = erro_emissao.error.detail
+                                            st.error(f"❌ Falha ao emitir {nome_completo}: {msg}")
+                                finally:
+                                    if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
+                                        os.remove(caminho_pfx_temp)
+
+                    # EXIBIÇÃO FINAL DOS BOLETOS
+                    if st.session_state.get("boletos_processados"):
+                        st.divider()
+                        st.markdown("### 🗂️ Boletos Prontos para Envio")
+                        
+                        for i, bol in enumerate(st.session_state.boletos_processados):
+                            colA, colB, colC = st.columns([3, 2, 2])
+                            colA.markdown(f"**{bol['nome']}**")
                             
-                            for i, bol in enumerate(st.session_state.boletos_processados):
-                                colA, colB, colC = st.columns([3, 2, 2])
-                                colA.markdown(f"**{bol['nome']}**")
-                                
-                                with colB:
-                                    if bol['link_drive']:
-                                        st.markdown(f"[🔗 Ver PDF no Drive]({bol['link_drive']})")
-                                    else:
-                                        st.caption("Salvo apenas na memória")
-                                
-                                with colC:
-                                    if bol['link_wa']:
-                                        st.markdown(f"**[📲 Enviar Mensagem Completa no WhatsApp]({bol['link_wa']})**")
-                                    else:
-                                        st.caption("Sem telefone cadastrado.")
+                            with colB:
+                                if bol['link_drive']:
+                                    st.markdown(f"[🔗 Ver PDF no Drive]({bol['link_drive']})")
+                                else:
+                                    st.caption("Salvo apenas na memória")
+                            
+                            with colC:
+                                if bol['link_wa']:
+                                    st.markdown(f"**[📲 Enviar Mensagem Completa no WhatsApp]({bol['link_wa']})**")
+                                else:
+                                    st.caption("Sem telefone cadastrado.")
             except Exception as e:
                 st.error(f"Erro na aba de Boletos: {e}")
                         
