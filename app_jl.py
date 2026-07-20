@@ -621,7 +621,7 @@ else:
             try: return float(val)
             except: return 0.0
 
-        # ==========================================
+                # ==========================================
                 # NOVA ABA: EXTRATO DO INVESTIDOR (AUDITORIA)
                 # ==========================================
                 with aba_extrato:
