@@ -1017,7 +1017,7 @@ else:
                                     aba_cadastro.update([df_para_salvar.columns.values.tolist()] + df_para_salvar.values.tolist())
                                     st.success("✅ Base de clientes atualizada com sucesso no Google Sheets!")
                                     
-                        with col_btn2:
+                       with col_btn2:
                             if st.button("🚀 Processar Boletos Selecionados", type="primary"):
                                 clientes_selecionados = df_editado[df_editado['Emitir'] == True]
                                 
@@ -1053,7 +1053,7 @@ else:
                                         )
                                         drive_service = build('drive', 'v3', credentials=creds_gcp)
                                     except Exception as e:
-                                        st.warning(f"Erro no Drive: {e}")
+                                        st.warning(f"Drive Desconectado (O PDF não será salvo na nuvem). Erro: {e}")
                                     
                                     # ==========================================
                                     # 2. CONFIGURAÇÃO BANCO INTER
@@ -1097,7 +1097,6 @@ else:
                                             numero = str(row['Numero']).strip() if str(row['Numero']).strip() != "" else "0"
                                             cpf_cnpj_limpo = re.sub(r'\D', '', str(row['CPF_CNPJ']))
                                             
-                                            # Pegando o Saldo Devedor (se a coluna existir no df_editado, senão usa 0)
                                             saldo_devedor = float(row.get('Saldo_Devedor', 0))
                                             
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
@@ -1136,14 +1135,28 @@ else:
                                                 boleto.data_vencimento = boleto.dataVencimento = boleto.due_date = boleto.dueDate = data_vencimento
                                                 boleto.pagador = boleto.payer = pagador
                                                 
+                                                # ==========================================
+                                                # CORREÇÃO: REGRAS DE ATRASO (MULTA E MORA)
+                                                # ==========================================
                                                 boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
                                                 try:
                                                     from inter_sdk_python.billing.models.Fine import Fine
                                                     from inter_sdk_python.billing.models.Mora import Mora
-                                                    multa = Fine(); multa.codigo_multa = multa.codigoMulta = "PERCENTUAL"; multa.valor_multa = multa.valorMulta = Decimal("2.00"); boleto.multa = boleto.fine = multa
-                                                    mora = Mora(); mora.codigo_mora = mora.codigoMora = "TAXA_MENSAL"; mora.valor_mora = mora.valorMora = Decimal("1.00"); boleto.mora = mora
-                                                except: pass
+                                                    
+                                                    # Usando .taxa no lugar de .valor para percentuais!
+                                                    multa = Fine()
+                                                    multa.codigo_multa = multa.codigoMulta = "PERCENTUAL"
+                                                    multa.taxa = Decimal("2.00")
+                                                    boleto.multa = boleto.fine = multa
+                                                    
+                                                    mora = Mora()
+                                                    mora.codigo_mora = mora.codigoMora = "TAXA_MENSAL"
+                                                    mora.taxa = Decimal("1.00")
+                                                    boleto.mora = mora
+                                                except Exception as err_regra:
+                                                    st.toast(f"Aviso: As regras de multa não foram aplicadas. {err_regra}")
 
+                                                # Emissão
                                                 res = sdk.billing().issue_billing(boleto)
                                                 n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None) or (res.get('nossoNumero') if isinstance(res, dict) else None) or (res.get('request_code') if isinstance(res, dict) else getattr(res, 'request_code', None))
                                                 
@@ -1166,17 +1179,14 @@ else:
                                                             media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf', resumable=True)
                                                             meta = {'name': nome_arquivo, 'parents': [PASTA_DRIVE_ID]}
                                                             
-                                                            # Faz o upload
                                                             arquivo_drive = drive_service.files().create(body=meta, media_body=media, fields='id').execute()
                                                             file_id = arquivo_drive.get('id')
                                                             
-                                                            # Dá permissão pública de leitura para qualquer pessoa com o link
                                                             drive_service.permissions().create(
                                                                 fileId=file_id,
                                                                 body={'type': 'anyone', 'role': 'reader'}
                                                             ).execute()
                                                             
-                                                            # Pega o link para enviar no WhatsApp
                                                             file_info = drive_service.files().get(fileId=file_id, fields='webViewLink').execute()
                                                             link_do_drive = file_info.get('webViewLink')
                                                         
@@ -1187,7 +1197,7 @@ else:
                                                         texto_msg = (
                                                             f"Olá {nome_completo}, tudo bem? "
                                                             f"Segue o link para baixar o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}.\n\n"
-                                                            f"👉 *Acessar Boleto:* {link_do_drive if link_do_drive else 'Erro ao gerar link'}\n\n"
+                                                            f"👉 *Acessar Boleto:* {link_do_drive if link_do_drive else '(Baixe o PDF acima)'}\n\n"
                                                             f"Informamos que o seu Saldo Devedor atualizado é de R$ {saldo_formatado}, "
                                                             f"restando aproximadamente {parcelas_restantes} parcela(s) para a quitação do seu contrato."
                                                         )
@@ -1200,7 +1210,7 @@ else:
                                                             "link_wa": link_wa,
                                                             "link_drive": link_do_drive
                                                         })
-                                                        st.success(f"🎉 PDF de {nome_completo} salvo no Drive com Link Público!")
+                                                        st.success(f"🎉 PDF de {nome_completo} gerado e salvo!")
                                                     except Exception as erro_pdf:
                                                         st.warning(f"⚠️ Boleto gerado, mas erro no PDF/Drive: {erro_pdf}")
                                                 else:
@@ -1214,7 +1224,7 @@ else:
                                     finally:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp): os.remove(caminho_pfx_temp)
 
-                        # EXIBIÇÃO PARA ENVIO VIA WHATSAPP (AGORA COM A MENSAGEM PRONTA)
+                        # EXIBIÇÃO FINAL
                         if st.session_state.get("boletos_processados"):
                             st.divider()
                             st.markdown("### 🗂️ Boletos Prontos para Envio")
