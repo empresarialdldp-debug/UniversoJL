@@ -1236,8 +1236,38 @@ else:
                                         st.markdown(f"**[📲 Enviar Mensagem no WhatsApp]({bol['link_wa']})**")
                                     else:
                                         st.caption("Sem telefone cadastrado.")
-                    except Exception as e:
-                        st.error(f"Erro ao carregar a aba 'Cadastro_Clientes': {e}")
+                    # EXTRATOR DE ERROS DETALHADO DO BANCO INTER
+                                            except Exception as erro_emissao:
+                                                st.error(f"❌ Falha ao emitir {nome_completo}.")
+                                                
+                                                with st.expander("🛠️ LOG TÉCNICO - CLIQUE PARA VER O MOTIVO EXATO", expanded=True):
+                                                    st.markdown("**1. Pacote enviado para o Banco Inter:**")
+                                                    st.json({
+                                                        "seuNumero": controle,
+                                                        "valorNominal": float(val),
+                                                        "dataVencimento": data_vencimento,
+                                                        "pagador": {
+                                                            "nome": nome_completo,
+                                                            "cpfCnpj": cpf_cnpj_limpo,
+                                                            "cep": cep_limpo if len(cep_limpo) == 8 else "30000000",
+                                                            "numero": numero,
+                                                            "endereco": rua_encontrada,
+                                                            "bairro": bairro_encontrado,
+                                                            "cidade": cidade_encontrada,
+                                                            "uf": uf_encontrada,
+                                                            "complemento": complemento_txt
+                                                        }
+                                                    })
+                                                    
+                                                    st.markdown("**2. Resposta Bruta e Direta do Banco Inter:**")
+                                                    st.write(f"**Tipo de Erro:** `{type(erro_emissao).__name__}`")
+                                                    try:
+                                                        if hasattr(erro_emissao, 'error') and erro_emissao.error:
+                                                            st.json(erro_emissao.error.__dict__)
+                                                        else:
+                                                            st.json(erro_emissao.__dict__)
+                                                    except:
+                                                        st.write(str(erro_emissao))
 
             except Exception as e:
                 st.error(f"Erro ao processar o Dashboard: {e}")
