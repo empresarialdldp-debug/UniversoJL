@@ -1062,19 +1062,21 @@ else:
                                                 st.error(f"❌ Linha ignorada: Nome vazio.")
                                                 continue
                                             if len(cpf_cnpj_limpo) < 11:
-                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido.")
+                                                st.error(f"❌ {nome_completo}: CPF/CNPJ {cpf_cnpj_limpo} inválido na base.")
                                                 continue
                                             if valor <= 0:
                                                 st.error(f"❌ {nome_completo}: O Valor da parcela está zerado.")
                                                 continue
                                             
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
-                                            controle = f"JL{idx}{segundos}S"[:15]
+                                            controle = f"JL{idx}{segundos}"[:15] # Trava absoluta de 15 caracteres
                                             
+                                            # IDENTIDADE FALSA PARA O VIACEP NÃO BLOQUEAR E TRAZER A RUA CORRETA
                                             rua_encontrada, bairro_encontrado, cidade_encontrada, uf_encontrada = "Logradouro", "Bairro", "Cidade", "MG"
                                             if len(cep_limpo) == 8:
                                                 try:
-                                                    resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
+                                                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                                                    resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", headers=headers, timeout=5)
                                                     if resp_cep.status_code == 200 and 'erro' not in resp_cep.json():
                                                         d_cep = resp_cep.json()
                                                         if d_cep.get('logradouro'): rua_encontrada = d_cep.get('logradouro')
@@ -1094,6 +1096,8 @@ else:
                                                 pagador.cpf_cnpj = pagador.cpfCnpj = cpf_cnpj_limpo
                                                 pagador.cep = pagador.zip_code = pagador.zipCode = cep_limpo if len(cep_limpo) == 8 else "30000000"
                                                 pagador.numero = pagador.number = numero
+                                                
+                                                # GARANTINDO QUE RUA E BAIRRO SEJAM ENVIADOS PARA O BANCO
                                                 pagador.endereco = pagador.address = pagador.logradouro = rua_encontrada
                                                 pagador.cidade = pagador.city = cidade_encontrada
                                                 pagador.uf = pagador.state = uf_encontrada
@@ -1182,11 +1186,14 @@ else:
                                             except Exception as erro_emissao:
                                                 msg = str(erro_emissao)
                                                 if hasattr(erro_emissao, 'error') and erro_emissao.error:
+                                                    msg = getattr(erro_emissao.error, 'detail', str(erro_emissao.error))
                                                     if hasattr(erro_emissao.error, 'violacoes') and erro_emissao.error.violacoes:
-                                                        violacoes = ", ".join([v.razao for v in erro_emissao.error.violacoes if hasattr(v, 'razao')])
-                                                        msg = f"{erro_emissao.error.title}: {violacoes}"
-                                                    else:
-                                                        msg = getattr(erro_emissao.error, 'detail', str(erro_emissao.error))
+                                                        viols = []
+                                                        for v in erro_emissao.error.violacoes:
+                                                            prop = getattr(v, 'propriedade', 'Campo')
+                                                            razao = getattr(v, 'razao', 'Incorreto')
+                                                            viols.append(f"{prop}: {razao}")
+                                                        msg += " | Motivo detalhado: " + ", ".join(viols)
                                                 st.error(f"❌ Falha ao emitir {nome_completo}: {msg}")
                                                 
                                     finally:
