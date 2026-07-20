@@ -911,7 +911,7 @@ else:
                             except Exception as e:
                                 st.caption(f"Sem histórico de ajustes na base. {e}")
 
-                # ==========================================
+               # ==========================================
                 # ABA DE BOLETOS
                 # ==========================================
                 with aba_boletos:
@@ -923,14 +923,41 @@ else:
                         aba_clientes = planilha_master.worksheet("Cadastro_Clientes")
                         df_boletos_tela = pd.DataFrame(aba_clientes.get_all_records())
                         
-                        # 2. ADICIONA A COLUNA DE CHECKBOX
+                        # Limpa colunas vazias
+                        colunas_validas = [col for col in df_boletos_tela.columns if str(col).strip() != "" and not str(col).startswith("Unnamed")]
+                        df_boletos_tela = df_boletos_tela[colunas_validas].copy()
+                        
+                        # 2. INJETA "VENCIMENTO" E "SALDO_DEVEDOR" PARA SEREM EDITÁVEIS NA TELA
+                        import datetime as dt
+                        data_padrao = (dt.datetime.today() + dt.timedelta(days=5)).strftime('%d/%m/%Y')
+                        
+                        if 'Vencimento' not in df_boletos_tela.columns:
+                            df_boletos_tela.insert(1, 'Vencimento', data_padrao)
+                            
+                        if 'Saldo_Devedor' not in df_boletos_tela.columns:
+                            saldos_dict = dict(zip(df_dash['Chave'], df_dash['Saldo_Devedor']))
+                            def buscar_saldo(nome):
+                                for chave, saldo in saldos_dict.items():
+                                    if str(nome).strip().upper() in str(chave).strip().upper():
+                                        return saldo
+                                return 0.0
+                            
+                            coluna_nome = 'Nome_Base' if 'Nome_Base' in df_boletos_tela.columns else 'Nome_Cliente'
+                            if coluna_nome in df_boletos_tela.columns:
+                                df_boletos_tela['Saldo_Devedor'] = df_boletos_tela[coluna_nome].apply(buscar_saldo)
+                        
+                        # 3. ADICIONA A COLUNA DE CHECKBOX
                         if 'Emitir' not in df_boletos_tela.columns:
                             df_boletos_tela.insert(0, 'Emitir', False)
                             
-                        # 3. EXIBE A TABELA NA TELA
+                        # 4. EXIBE A TABELA (Tudo o que estiver aqui será editável por você)
                         df_editado = st.data_editor(
                             df_boletos_tela,
-                            column_config={"Emitir": st.column_config.CheckboxColumn("Gerar?", default=False)},
+                            column_config={
+                                "Emitir": st.column_config.CheckboxColumn("Gerar?", default=False),
+                                "Vencimento": st.column_config.TextColumn("Vencimento (DD/MM/AAAA)"),
+                                "Saldo_Devedor": st.column_config.NumberColumn("Saldo Devedor", format="R$ %.2f")
+                            },
                             hide_index=True,
                             use_container_width=True
                         )
@@ -950,7 +977,6 @@ else:
                                     import tempfile
                                     import base64
                                     import os
-                                    import datetime as dt
                                     from decimal import Decimal
                                     import re
                                     import requests
@@ -958,7 +984,7 @@ else:
                                     import math
                                     
                                     # ==========================================
-                                    # 1. GOOGLE DRIVE (CORREÇÃO DO PEM APLICADA)
+                                    # 1. GOOGLE DRIVE
                                     # ==========================================
                                     PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
                                     drive_service = None
@@ -1003,28 +1029,28 @@ else:
                                         sdk = InterSdk("PRODUCTION", creds_inter["client_id"], creds_inter["client_secret"], caminho_pfx_temp, creds_inter["pfx_senha"])
                                         sdk.set_account(creds_inter["conta_corrente"].replace("-",""))
                                         
+                                        def extrair_float(val):
+                                            v = str(val).replace('R$', '').strip()
+                                            if not v: return 0.0
+                                            if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+                                            elif ',' in v: v = v.replace(',', '.')
+                                            try: return float(v)
+                                            except: return 0.0
+
                                         # ==========================================
                                         # 3. MOTOR DE EMISSÃO
                                         # ==========================================
                                         for idx, row in clientes_selecionados.iterrows():
-                                            # LÊ AS COLUNAS EXATAS DA SUA PLANILHA
-                                            val_nome = row.get('Nome_Base', '')
+                                            val_nome = row.get('Nome_Base', row.get('Nome_Cliente', ''))
                                             val_cpf = row.get('CPF_CNPJ', '')
                                             val_zap = row.get('WhatsApp', '')
                                             val_cep = row.get('CEP', '30000000')
                                             val_num = row.get('Numero', '0')
                                             complemento_txt = str(row.get('Complemento', '')).strip()
                                             
-                                            try: 
-                                                valor_str = str(row.get('Valor_Parcela', '0')).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
-                                                valor = float(valor_str)
-                                            except: 
-                                                valor = 0.0
-                                                
-                                            val_venc = row.get('Vencimento', dt.datetime.today().strftime('%d/%m/%Y'))
-                                            vencimento = str(val_venc)
-                                            
-                                            saldo_devedor = float(row.get('Saldo_Devedor', 0.0))
+                                            valor = extrair_float(row.get('Valor_Parcela', 0.0))
+                                            saldo_devedor = extrair_float(row.get('Saldo_Devedor', 0.0))
+                                            vencimento = str(row.get('Vencimento', data_padrao)).strip()
                                             
                                             nome_completo = str(val_nome).split('-')[0].strip()[:100]
                                             cpf_cnpj_limpo = re.sub(r'\D', '', str(val_cpf))
@@ -1033,13 +1059,13 @@ else:
                                             numero = str(val_num).strip() if str(val_num).strip() != "" else "0"
                                             
                                             if not nome_completo or nome_completo.lower() in ["nan", "none", ""]:
-                                                st.error(f"❌ Linha ignorada: A coluna 'Nome_Base' está vazia.")
+                                                st.error(f"❌ Linha ignorada: Nome vazio.")
                                                 continue
                                             if len(cpf_cnpj_limpo) < 11:
-                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido ou ausente.")
+                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido.")
                                                 continue
                                             if valor <= 0:
-                                                st.error(f"❌ {nome_completo}: O Valor_Parcela está zerado.")
+                                                st.error(f"❌ {nome_completo}: O Valor da parcela está zerado.")
                                                 continue
                                             
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
@@ -1061,7 +1087,7 @@ else:
                                                 try:
                                                     data_vencimento = dt.datetime.strptime(vencimento, '%d/%m/%Y').strftime('%Y-%m-%d')
                                                 except:
-                                                    data_vencimento = dt.datetime.today().strftime('%Y-%m-%d')
+                                                    data_vencimento = (dt.datetime.today() + dt.timedelta(days=5)).strftime('%Y-%m-%d')
                                                 
                                                 pagador = Person()
                                                 pagador.nome = pagador.name = nome_completo
@@ -1155,14 +1181,18 @@ else:
                                             
                                             except Exception as erro_emissao:
                                                 msg = str(erro_emissao)
-                                                if hasattr(erro_emissao, 'error') and erro_emissao.error: msg = erro_emissao.error.detail
+                                                if hasattr(erro_emissao, 'error') and erro_emissao.error:
+                                                    if hasattr(erro_emissao.error, 'violacoes') and erro_emissao.error.violacoes:
+                                                        violacoes = ", ".join([v.razao for v in erro_emissao.error.violacoes if hasattr(v, 'razao')])
+                                                        msg = f"{erro_emissao.error.title}: {violacoes}"
+                                                    else:
+                                                        msg = getattr(erro_emissao.error, 'detail', str(erro_emissao.error))
                                                 st.error(f"❌ Falha ao emitir {nome_completo}: {msg}")
                                                 
                                     finally:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
 
-                        # Renderiza os resultados do processamento
                         if st.session_state.get("boletos_processados"):
                             st.divider()
                             st.markdown("### 🗂️ Boletos Prontos para Envio")
