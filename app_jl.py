@@ -984,7 +984,7 @@ else:
                                     st.error(f"Erro ao salvar: {e}")
 
                         # ==========================================
-                        # BOTÃO DE EMITIR BOLETOS
+                        # BOTÃO DE EMITIR BOLETOS (DRIVE DESLIGADO)
                         # ==========================================
                         with col_btn2:
                             if st.button("🚀 Processar Boletos Selecionados", type="primary", use_container_width=True):
@@ -1005,27 +1005,7 @@ else:
                                     import io
                                     import math
                                     
-                                    # 1. GOOGLE DRIVE
-                                    PASTA_DRIVE_ID = "1yFTfudMhSBCfsmLx4q3o1krg7LZLWmiy"
-                                    drive_service = None
-                                    try:
-                                        from google.oauth2.service_account import Credentials
-                                        from googleapiclient.discovery import build
-                                        from googleapiclient.http import MediaIoBaseUpload
-                                        
-                                        creds_dict = dict(st.secrets["gcp_service_account"])
-                                        if "private_key" in creds_dict:
-                                            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-                                            
-                                        creds_gcp = Credentials.from_service_account_info(
-                                            creds_dict,
-                                            scopes=['https://www.googleapis.com/auth/drive']
-                                        )
-                                        drive_service = build('drive', 'v3', credentials=creds_gcp)
-                                    except Exception as e:
-                                        st.warning(f"Drive Desconectado. PDF só na memória. Erro: {e}")
-                                        
-                                    # 2. BANCO INTER
+                                    # BANCO INTER
                                     caminho_pfx_temp = None
                                     try:
                                         creds_inter = st.secrets["inter_api"]
@@ -1055,7 +1035,7 @@ else:
                                             try: return float(v)
                                             except: return 0.0
 
-                                        # 3. MOTOR DE EMISSÃO
+                                        # MOTOR DE EMISSÃO
                                         for idx, row in clientes_selecionados.iterrows():
                                             val_nome = row.get('Nome_Base', '')
                                             val_cpf = row.get('CPF_CNPJ', '')
@@ -1066,7 +1046,7 @@ else:
                                             
                                             valor = extrair_float(row.get('Valor_Parcela', 0.0))
                                             saldo_devedor = extrair_float(row.get('Saldo_Devedor', 0.0))
-                                            vencimento = str(row.get('Vencimento', '')).strip()
+                                            vencimento = str(row.get('Vencimento', data_padrao)).strip()
                                             
                                             nome_completo = str(val_nome).split('-')[0].strip()[:100]
                                             cpf_cnpj_limpo = re.sub(r'\D', '', str(val_cpf))
@@ -1133,8 +1113,7 @@ else:
                                                 
                                                 boleto.num_dias_agenda = boleto.numDiasAgenda = boleto.scheduled_days = 30
                                                 
-                                                # MULTA E MORA REMOVIDOS AQUI PARA DESTRAVAR A EMISSÃO DO BANCO
-
+                                                # EMITINDO NO BANCO
                                                 res = sdk.billing().issue_billing(boleto)
                                                 
                                                 n_num = None
@@ -1144,37 +1123,24 @@ else:
                                                     n_num = getattr(res, 'nossoNumero', None) or getattr(res, 'nosso_numero', None) or getattr(res, 'request_code', None)
                                                 
                                                 if n_num:
-                                                    st.info(f"⏳ Boleto aceito! Gerando arquivo (Cód: {str(n_num)[:8]}...).")
+                                                    st.info(f"⏳ Boleto aceito no banco! Gerando arquivo (Cód: {str(n_num)[:8]}...).")
                                                     import time
                                                     time.sleep(4)  
                                                     
                                                     pdf_path = os.path.join(tempfile.gettempdir(), f"{controle}.pdf")
-                                                    link_do_drive = None
                                                     
                                                     try:
+                                                        # BAIXA O PDF DIRETAMENTE PARA O APLICATIVO
                                                         sdk.billing().retrieve_billing_pdf(str(n_num), file=pdf_path)
                                                         with open(pdf_path, "rb") as f:
                                                             pdf_bytes = f.read()
-                                                            
-                                                        # UPLOAD PRO DRIVE
-                                                        if drive_service:
-                                                            nome_arquivo = f"Boleto_JL_{nome_completo.replace(' ', '_')}_{vencimento.replace('/', '-')}.pdf"
-                                                            media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf', resumable=True)
-                                                            meta = {'name': nome_arquivo, 'parents': [PASTA_DRIVE_ID]}
-                                                            
-                                                            arquivo_drive = drive_service.files().create(body=meta, media_body=media, fields='id').execute()
-                                                            file_id = arquivo_drive.get('id')
-                                                            
-                                                            drive_service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
-                                                            link_do_drive = drive_service.files().get(fileId=file_id, fields='webViewLink').execute().get('webViewLink')
                                                             
                                                         parcelas_restantes = math.ceil(saldo_devedor / float(valor)) if float(valor) > 0 else 0
                                                         saldo_formatado = f"{saldo_devedor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                                                         
                                                         texto_msg = (
                                                             f"Olá {nome_completo}, tudo bem? "
-                                                            f"Segue o link para baixar o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}.\n\n"
-                                                            f"👉 *Acessar Boleto:* {link_do_drive if link_do_drive else '(Baixe o PDF abaixo)'}\n\n"
+                                                            f"Segue em anexo o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}.\n\n"
                                                             f"Informamos que o seu Saldo Devedor atualizado é de R$ {saldo_formatado}, "
                                                             f"restando aproximadamente {parcelas_restantes} parcela(s) para a quitação do seu contrato."
                                                         )
@@ -1183,51 +1149,23 @@ else:
                                                         st.session_state.boletos_processados.append({
                                                             "nome": nome_completo,
                                                             "arquivo": pdf_bytes,
-                                                            "link_wa": link_wa,
-                                                            "link_drive": link_do_drive
+                                                            "link_wa": link_wa
                                                         })
-                                                        st.success(f"🎉 PDF de {nome_completo} gerado com sucesso!")
+                                                        st.success(f"🎉 PDF de {nome_completo} pronto para baixar!")
                                                     except Exception as erro_pdf:
-                                                        st.warning(f"⚠️ Boleto gerado, mas ocorreu erro no Drive/PDF: {erro_pdf}")
+                                                        st.warning(f"⚠️ Erro ao tentar puxar o PDF do banco: {erro_pdf}")
                                                 else:
                                                     st.error(f"❌ O Banco aceitou a requisição, mas não retornou um rastreio.")
                                             
-                                            # EXTRATOR DE ERROS DETALHADO DO BANCO INTER
                                             except Exception as erro_emissao:
                                                 st.error(f"❌ Falha ao emitir {nome_completo}.")
-                                                
-                                                with st.expander("🛠️ LOG TÉCNICO - CLIQUE PARA VER O MOTIVO EXATO", expanded=True):
-                                                    st.markdown("**1. Pacote enviado para o Banco Inter:**")
-                                                    st.json({
-                                                        "seuNumero": controle,
-                                                        "valorNominal": float(val),
-                                                        "dataVencimento": data_vencimento,
-                                                        "pagador": {
-                                                            "nome": nome_completo,
-                                                            "cpfCnpj": cpf_cnpj_limpo,
-                                                            "cep": cep_limpo if len(cep_limpo) == 8 else "30000000",
-                                                            "numero": numero,
-                                                            "endereco": rua_encontrada,
-                                                            "bairro": bairro_encontrado,
-                                                            "cidade": cidade_encontrada,
-                                                            "uf": uf_encontrada,
-                                                            "complemento": complemento_txt
-                                                        }
-                                                    })
+                                                with st.expander("🛠️ LOG DE ERRO", expanded=False):
+                                                    st.write(str(erro_emissao))
                                                     
-                                                    st.markdown("**2. Resposta Bruta e Direta do Banco Inter:**")
-                                                    st.write(f"**Tipo de Erro:** `{type(erro_emissao).__name__}`")
-                                                    try:
-                                                        if hasattr(erro_emissao, 'error') and erro_emissao.error:
-                                                            st.json(erro_emissao.error.__dict__)
-                                                        else:
-                                                            st.json(erro_emissao.__dict__)
-                                                    except:
-                                                        st.write(str(erro_emissao))
-                                                        
                                     finally:
                                         if caminho_pfx_temp and os.path.exists(caminho_pfx_temp):
                                             os.remove(caminho_pfx_temp)
+
                         if st.session_state.get("boletos_processados"):
                             st.divider()
                             st.markdown("### 🗂️ Boletos Prontos para Envio")
@@ -1237,16 +1175,13 @@ else:
                                 colA.markdown(f"**{bol['nome']}**")
                                 
                                 with colB:
-                                    if bol['link_drive']:
-                                        st.markdown(f"[🔗 Link do Boleto no Drive]({bol['link_drive']})")
-                                    else:
-                                        st.download_button(
-                                            label="📥 Baixar PDF Original",
-                                            data=bol['arquivo'],
-                                            file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
-                                            mime="application/pdf",
-                                            key=f"dl_{i}"
-                                        )
+                                    st.download_button(
+                                        label="📥 Baixar PDF Original",
+                                        data=bol['arquivo'],
+                                        file_name=f"Boleto_{bol['nome'].replace(' ', '_')}.pdf",
+                                        mime="application/pdf",
+                                        key=f"dl_{i}"
+                                    )
                                 
                                 with colC:
                                     if bol['link_wa']:
