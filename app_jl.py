@@ -1024,46 +1024,119 @@ else:
                                 if clientes_selecionados.empty:
                                     st.warning("Selecione pelo menos um cliente marcando a caixa 'Gerar?'.")
                                 else:
-                                    st.success(f"Preparando boletos para {len(clientes_selecionados)} cliente(s)...")
+                                    st.success(f"Emitindo {len(clientes_selecionados)} boleto(s) no Banco Inter...")
+                                    st.session_state.boletos_processados = []
+                                    
+                                    # 1. CONFIGURAÇÃO REAL DO SDK USANDO SEUS SECRETS
+                                    from inter_sdk_python.inter_sdk import InterSdk
+                                    
+                                    sdk = InterSdk(
+                                        client_id=st.secrets["inter"]["client_id"],
+                                        client_secret=st.secrets["inter"]["client_secret"],
+                                        certificate=st.secrets["inter"]["pfx_base64"],
+                                        password=st.secrets["inter"]["cert_password"]
+                                    )
+                                    sdk.set_account(st.secrets["inter"]["conta_corrente"])
                                     
                                     for idx, row in clientes_selecionados.iterrows():
                                         nome_completo = row['Nome_Cliente'].split('-')[0].strip()
                                         zap = str(row['WhatsApp']).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
                                         cep_limpo = str(row['CEP']).replace('-', '').replace('.', '').strip()
                                         valor = row['Valor_Parcela']
-                                        vencimento = row['Vencimento']
+                                        vencimento = row['Vencimento']  # Formato DD/MM/AAAA da tela
                                         numero = row['Numero']
+                                        cpf_cnpj_limpo = str(row['CPF_CNPJ']).replace('.', '').replace('-', '').replace('/', '').strip()
                                         
-                                        # 3. BUSCA INTELIGENTE DO ENDEREÇO "POR DENTRO" VIA API
-                                        rua_encontrada = "Endereço Padrão"
-                                        bairro_encontrado = "Bairro Padrão"
-                                        cidade_encontrada = "Belo Horizonte"
-                                        uf_encontrada = "MG"
-                                        
+                                        # 2. BUSCA DO ENDEREÇO PELO VIACEP
+                                        rua = "Endereço Padrão"
+                                        bairro = "Bairro Padrão"
+                                        cidade = "Belo Horizonte"
+                                        uf = "MG"
                                         if len(cep_limpo) == 8:
                                             try:
                                                 resp_cep = requests.get(f"https://viacep.com.br/ws/{cep_limpo}/json/", timeout=5)
-                                                if resp_cep.status_code == 200:
+                                                if resp_cep.status_code == 200 and 'erro' not in resp_cep.json():
                                                     dados_cep = resp_cep.json()
-                                                    if 'erro' not in dados_cep:
-                                                        rua_encontrada = dados_cep.get('logradouro', rua_encontrada)
-                                                        bairro_encontrado = dados_cep.get('bairro', bairro_encontrado)
-                                                        cidade_encontrada = dados_cep.get('localidade', cidade_encontrada)
-                                                        uf_encontrada = dados_cep.get('uf', uf_encontrada)
-                                            except:
-                                                pass
-                                                
-                                        # (AQUI ENTRARÁ O CÓDIGO DO BANCO INTER USANDO AS VARIÁVEIS ACIMA)
-                                        
-                                        link_boleto = "https://bancointer.com.br/boleto/exemplo_jl_123" 
-                                        
-                                        if len(zap) >= 10:
-                                            texto_msg = f"Olá {nome_completo}, segue o link do seu boleto com vencimento em {vencimento} no valor de R$ {valor:.2f}: {link_boleto}".replace(' ', '%20')
-                                            link_wa = f"https://wa.me/55{zap}?text={texto_msg}"
+                                                    rua = dados_cep.get('logradouro', rua)
+                                                    bairro = dados_cep.get('bairro', bairro)
+                                                    cidade = dados_cep.get('localidade', cidade)
+                                                    uf = dados_cep.get('uf', uf)
+                                            except: pass
                                             
-                                            st.markdown(f"✅ Fatura de **{nome_completo}** gerada! ➔ [📲 Enviar Boleto via WhatsApp]({link_wa})")
-                                        else:
-                                            st.markdown(f"✅ Fatura de **{nome_completo}** gerada! *(Telefone em branco)* ➔ Link: {link_boleto}")
+                                        try:
+                                            # 3. PREPARANDO O PAGADOR
+                                            tipo_pessoa = PersonType.FISICA if len(cpf_cnpj_limpo) <= 11 else PersonType.JURIDICA
+                                            pagador = Person(
+                                                cpfCnpj=cpf_cnpj_limpo,
+                                                personType=tipo_pessoa,
+                                                name=nome_completo,
+                                                address=rua,
+                                                number=numero,
+                                                complement=str(row['Complemento']),
+                                                neighborhood=bairro,
+                                                city=cidade,
+                                                state=uf,
+                                                zipCode=cep_limpo
+                                            )
+                                            
+                                            # Formata a data de DD/MM/AAAA para AAAA-MM-DD para a API do Banco
+                                            vencimento_api = datetime.datetime.strptime(vencimento, '%d/%m/%Y').strftime('%Y-%m-%d')
+                                            
+                                            # 4. EMITINDO O BOLETO NO BANCO
+                                            boleto_req = BillingIssueRequest(
+                                                seuNumero=f"JL-{int(datetime.datetime.now().timestamp())}",
+                                                valorNominal=valor,
+                                                dataVencimento=vencimento_api,
+                                                numDiasAgenda=30,
+                                                pagador=pagador,
+                                                mensagem={"linha1": row['Descricao']}
+                                            )
+                                            
+                                            resposta_emissao = sdk.billing().issue_billing(boleto_req)
+                                            nosso_numero = resposta_emissao.nossoNumero
+                                            
+                                            # 5. RECUPERANDO O ARQUIVO PDF REAL DO BANCO
+                                            pdf_base64 = sdk.billing().retrieve_billing_pdf(nosso_numero)
+                                            import base64
+                                            pdf_bytes = base64.b64decode(pdf_base64)
+                                            
+                                            # 6. MENSAGEM DO WHATSAPP (Apenas com o texto pedindo para olhar o anexo)
+                                            texto_msg = f"Olá {nome_completo}, segue em anexo o seu boleto da J&L Incorporadora no valor de R$ {valor:.2f} com vencimento para {vencimento}."
+                                            link_wa = f"https://wa.me/55{zap}?text={texto_msg.replace(' ', '%20')}" if len(zap) >= 10 else None
+                                            
+                                            st.session_state.boletos_processados.append({
+                                                "nome": nome_completo,
+                                                "arquivo": pdf_bytes,
+                                                "link_wa": link_wa
+                                            })
+                                            st.success(f"✅ Boleto de {nome_completo} gerado com sucesso!")
+                                            
+                                        except Exception as e:
+                                            st.error(f"❌ Erro ao emitir para {nome_completo}: {e}")
+
+                        # EXIBINDO OS BOTÕES PARA DOWNLOAD DO PDF REAL
+                        if st.session_state.get("boletos_processados"):
+                            st.divider()
+                            st.markdown("### 🗂️ Boletos Gerados Prontos para Download")
+                            
+                            for i, bol in enumerate(st.session_state.boletos_processados):
+                                colA, colB, colC = st.columns([3, 2, 2])
+                                colA.markdown(f"**{bol['nome']}**")
+                                
+                                with colB:
+                                    st.download_button(
+                                        label="📥 Baixar PDF Real",
+                                        data=bol['arquivo'],
+                                        file_name=f"Boleto_JL_{bol['nome'].replace(' ', '_')}.pdf",
+                                        mime="application/pdf",
+                                        key=f"dl_real_{i}"
+                                    )
+                                
+                                with colC:
+                                    if bol['link_wa']:
+                                        st.markdown(f"[📲 Abrir WhatsApp do Cliente]({bol['link_wa']})")
+                                    else:
+                                        st.caption("Sem telefone cadastrado.")
                     else:
                         st.success("🎉 Todos os contratos quitados.")
                         
