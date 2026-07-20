@@ -918,19 +918,14 @@ else:
                     st.subheader("🧾 Emissão Lote de Boletos - Banco Inter")
                     st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
                     
-                    # 1. RESTAURANDO A FILTRAGEM ORIGINAL: 
-                    # Selecionamos apenas as colunas que importam, ignorando colunas vazias/fantasmas da planilha
-                    colunas_alvo = ['Nome_Cliente', 'CPF_CNPJ', 'WhatsApp', 'CEP', 'Numero', 'Complemento', 'Valor_Parcela', 'Vencimento', 'Saldo_Devedor']
-                    colunas_reais = [col for col in colunas_alvo if col in df_dash.columns]
+                    # 👇 COLOQUE O NOME DO SEU DATAFRAME ORIGINAL AQUI (o que tem Nome, CPF, WhatsApp, etc)
+                    df_boletos_tela = NOME_DO_SEU_DATAFRAME_ORIGINAL.copy() 
                     
-                    df_devedores = df_dash[colunas_reais].copy()
-                    
-                    if 'Emitir' not in df_devedores.columns:
-                        df_devedores.insert(0, 'Emitir', False)
+                    if 'Emitir' not in df_boletos_tela.columns:
+                        df_boletos_tela.insert(0, 'Emitir', False)
                         
-                    # 2. TABELA VISUAL (Agora protegida contra colunas duplicadas/vazias)
                     df_editado = st.data_editor(
-                        df_devedores,
+                        df_boletos_tela,
                         column_config={"Emitir": st.column_config.CheckboxColumn("Gerar?", default=False)},
                         hide_index=True,
                         use_container_width=True
