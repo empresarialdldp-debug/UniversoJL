@@ -919,11 +919,16 @@ else:
                     st.markdown("Selecione os clientes na tabela abaixo marcando a caixa **'Gerar?'** e clique no botão para emitir.")
                     
                     try:
-                        # 1. PUXA OS DADOS REAIS DO CLIENTE
+                        # 1. PUXA OS DADOS REAIS DO CLIENTE (BLINDADO CONTRA COLUNAS VAZIAS NO SHEETS)
                         aba_clientes = planilha_master.worksheet("Cadastro_Clientes")
-                        df_boletos_tela = pd.DataFrame(aba_clientes.get_all_records())
+                        dados_aba = aba_clientes.get_all_values()
                         
-                        # Limpa colunas vazias
+                        if len(dados_aba) > 1:
+                            df_boletos_tela = pd.DataFrame(dados_aba[1:], columns=dados_aba[0])
+                        else:
+                            df_boletos_tela = pd.DataFrame()
+                        
+                        # Limpa colunas vazias ou duplicadas em branco
                         colunas_validas = [col for col in df_boletos_tela.columns if str(col).strip() != "" and not str(col).startswith("Unnamed")]
                         df_boletos_tela = df_boletos_tela[colunas_validas].copy()
                         
@@ -1062,16 +1067,15 @@ else:
                                                 st.error(f"❌ Linha ignorada: Nome vazio.")
                                                 continue
                                             if len(cpf_cnpj_limpo) < 11:
-                                                st.error(f"❌ {nome_completo}: CPF/CNPJ {cpf_cnpj_limpo} inválido na base.")
+                                                st.error(f"❌ {nome_completo}: CPF/CNPJ inválido.")
                                                 continue
                                             if valor <= 0:
                                                 st.error(f"❌ {nome_completo}: O Valor da parcela está zerado.")
                                                 continue
                                             
                                             segundos = str(int(dt.datetime.now().timestamp()))[-6:]
-                                            controle = f"JL{idx}{segundos}"[:15] # Trava absoluta de 15 caracteres
+                                            controle = f"JL{idx}{segundos}"[:15]
                                             
-                                            # IDENTIDADE FALSA PARA O VIACEP NÃO BLOQUEAR E TRAZER A RUA CORRETA
                                             rua_encontrada, bairro_encontrado, cidade_encontrada, uf_encontrada = "Logradouro", "Bairro", "Cidade", "MG"
                                             if len(cep_limpo) == 8:
                                                 try:
@@ -1097,7 +1101,6 @@ else:
                                                 pagador.cep = pagador.zip_code = pagador.zipCode = cep_limpo if len(cep_limpo) == 8 else "30000000"
                                                 pagador.numero = pagador.number = numero
                                                 
-                                                # GARANTINDO QUE RUA E BAIRRO SEJAM ENVIADOS PARA O BANCO
                                                 pagador.endereco = pagador.address = pagador.logradouro = rua_encontrada
                                                 pagador.cidade = pagador.city = cidade_encontrada
                                                 pagador.uf = pagador.state = uf_encontrada
@@ -1227,8 +1230,6 @@ else:
                                         st.caption("Sem telefone cadastrado.")
                     except Exception as e:
                         st.error(f"Erro ao carregar a aba 'Cadastro_Clientes': {e}")
-            except Exception as e:
-                st.error(f"Erro ao processar o Dashboard: {e}")
                         
 
     
